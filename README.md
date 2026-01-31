@@ -1,4 +1,4 @@
-# 🚀 GrooveOS - Discord Bot para Gestión de Proxmox & Música
+# GrooveOS - Discord Bot - Gestión Proxmox & Música
 
 GrooveOS es un bot de Discord desarrollado en Python con una arquitectura **modular (Cogs)**. Su función principal es permitir la gestión remota de servidores de Minecraft alojados en contenedores **LXC de Proxmox**, además de ofrecer un sistema completo de música.
 

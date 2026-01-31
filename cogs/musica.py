@@ -181,6 +181,11 @@ class Musica(commands.Cog):
                     
                     # Si no hay nada sonando, iniciamos la primera canción de la playlist
                     if not ctx.voice_client.is_playing():
+                        # REGISTRO DE PERFIL (Incrementa contador al usuario)
+                        perfiles_cog = self.bot.get_cog('Perfiles')
+                        if perfiles_cog:
+                            await perfiles_cog.actualizar_stats(ctx.author.id)
+                        
                         await self.play_music(ctx, self.song_queue.pop(0))
                     return 
 
@@ -196,6 +201,11 @@ class Musica(commands.Cog):
             if len(self.song_queue) == 1:
                 self.bot.loop.create_task(self.preload_next(self.song_queue[0]))
         else:
+            # REGISTRO DE PERFIL (Incrementa contador al usuario antes de sonar)
+            perfiles_cog = self.bot.get_cog('Perfiles')
+            if perfiles_cog:
+                await perfiles_cog.actualizar_stats(ctx.author.id)
+            
             # Si no hay música, reproducimos inmediatamente (usará el buffer si existe)
             await self.play_music(ctx, query)
 

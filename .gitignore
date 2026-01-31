@@ -16,3 +16,14 @@ code-cli.tar.gz
 .lesshst
 .profile
 .wget-hsts
+# Archivos de audio temporales
+youtube-*
+*.mp3
+*.webm
+*.m4a
+
+# Credenciales y configuración
+.env
+.git-credentials
+__pycache__/
+.cache/

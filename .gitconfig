@@ -1,3 +1,5 @@
 [user]
 	email = miguel.alejandro.figueroa@gmail.com
 	name = al3w0f
+[credential]
+	helper = store

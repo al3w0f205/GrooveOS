@@ -20,6 +20,7 @@ El bot utiliza un sistema de **Cogs** para separar las responsabilidades y facil
 * `.p [búsqueda/link]`: Busca y reproduce música en el canal de voz actual.
 * `.stop`: Detiene la música y limpia la cola de reproducción.
 * `.join`: Une al bot al canal de voz del usuario.
+* `.skip` - Salta a la siguiente canción.
 
 ## 🔒 Seguridad
 Este proyecto implementa buenas prácticas de seguridad mediante el uso de archivos `.env` para ocultar tokens de acceso y credenciales de servidor, los cuales están protegidos mediante el archivo `.gitignore`.

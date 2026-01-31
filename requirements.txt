@@ -1,0 +1,7 @@
+discord.py
+yt-dlp
+python-dotenv
+proxmoxer
+requests
+urllib3
+PyNaCl

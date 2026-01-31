@@ -184,8 +184,8 @@ class Musica(commands.Cog):
                         # REGISTRO DE PERFIL (Incrementa contador al usuario)
                         perfiles_cog = self.bot.get_cog('Perfiles')
                         if perfiles_cog:
-                            await perfiles_cog.actualizar_stats(ctx.author.id)
-                        
+                           await perfiles_cog.actualizar_stats(ctx)
+                           
                         await self.play_music(ctx, self.song_queue.pop(0))
                     return 
 
@@ -204,7 +204,7 @@ class Musica(commands.Cog):
             # REGISTRO DE PERFIL (Incrementa contador al usuario antes de sonar)
             perfiles_cog = self.bot.get_cog('Perfiles')
             if perfiles_cog:
-                await perfiles_cog.actualizar_stats(ctx.author.id)
+                await perfiles_cog.actualizar_stats(ctx)
             
             # Si no hay música, reproducimos inmediatamente (usará el buffer si existe)
             await self.play_music(ctx, query)

@@ -11,8 +11,9 @@ class Perfiles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """Crea la base de datos y las tablas si no existen."""
+        """Crea la base de datos y añade columnas nuevas si es necesario."""
         async with aiosqlite.connect(self.db_path) as db:
+            # 1. Crear la tabla base si no existe
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS usuarios (
                     user_id INTEGER PRIMARY KEY,
@@ -21,37 +22,55 @@ class Perfiles(commands.Cog):
                     xp INTEGER DEFAULT 0
                 )
             ''')
+            
+            # 2. Intentar agregar la columna de tiempo (segundos_escuchados)
+            try:
+                await db.execute('ALTER TABLE usuarios ADD COLUMN segundos_escuchados INTEGER DEFAULT 0')
+                print("📊 Columna 'segundos_escuchados' añadida exitosamente.")
+            except aiosqlite.OperationalError:
+                # Si entra aquí es porque la columna ya existe, así que no hacemos nada
+                pass
+                
             await db.commit()
-        print("🗄️ Base de datos Perfiles lista y conectada.")
+        print("🗄️ Base de datos Perfiles actualizada y conectada.")
+        
 
-    async def actualizar_stats(self, ctx):
-        """Incrementa canciones, suma XP y gestiona subidas de nivel."""
+    async def actualizar_stats(self, ctx, duracion=0):
+        """Incrementa canciones, suma XP, gestiona niveles y acumula tiempo de escucha."""
         user_id = ctx.author.id
         xp_ganado = random.randint(15, 25)
 
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute('SELECT xp, nivel FROM usuarios WHERE user_id = ?', (user_id,)) as cursor:
+            # 1. Obtenemos todos los datos necesarios, incluido el tiempo actual
+            async with db.execute(
+                'SELECT xp, nivel, segundos_escuchados FROM usuarios WHERE user_id = ?', 
+                (user_id,)
+            ) as cursor:
                 row = await cursor.fetchone()
             
             if not row:
+                # Si el usuario es nuevo en la base de datos
                 await db.execute('''
-                    INSERT INTO usuarios (user_id, canciones_pedidas, xp, nivel) 
-                    VALUES (?, 1, ?, 1)
-                ''', (user_id, xp_ganado))
+                    INSERT INTO usuarios (user_id, canciones_pedidas, xp, nivel, segundos_escuchados) 
+                    VALUES (?, 1, ?, 1, ?)
+                ''', (user_id, xp_ganado, duracion))
             else:
-                xp_actual, nivel_actual = row[0], row[1]
+                xp_actual, nivel_actual, tiempo_actual = row[0], row[1], row[2]
                 nuevo_xp = xp_actual + xp_ganado
+                nuevo_tiempo = tiempo_actual + duracion
                 xp_necesario = nivel_actual * 100
 
                 if nuevo_xp >= xp_necesario:
+                    # Lógica de Subida de Nivel
                     nuevo_nivel = nivel_actual + 1
                     await db.execute('''
                         UPDATE usuarios 
                         SET canciones_pedidas = canciones_pedidas + 1, 
                             xp = ?, 
-                            nivel = ? 
+                            nivel = ?,
+                            segundos_escuchados = ?
                         WHERE user_id = ?
-                    ''', (nuevo_xp - xp_necesario, nuevo_nivel, user_id))
+                    ''', (nuevo_xp - xp_necesario, nuevo_nivel, nuevo_tiempo, user_id))
                     
                     embed = discord.Embed(
                         title="✨ ¡SUBIDA DE NIVEL! ✨",
@@ -60,12 +79,14 @@ class Perfiles(commands.Cog):
                     )
                     await ctx.send(embed=embed)
                 else:
+                    # Actualización normal (Suma canciones, XP y segundos)
                     await db.execute('''
                         UPDATE usuarios 
                         SET canciones_pedidas = canciones_pedidas + 1, 
-                            xp = ? 
+                            xp = ?,
+                            segundos_escuchados = ?
                         WHERE user_id = ?
-                    ''', (nuevo_xp, user_id))
+                    ''', (nuevo_xp, nuevo_tiempo, user_id))
             
             await db.commit()
 

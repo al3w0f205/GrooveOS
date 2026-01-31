@@ -96,36 +96,45 @@ class Musica(commands.Cog):
             await self.play_music(ctx, self.song_queue.pop(0))
 
     async def play_music(self, ctx, query):
-        """Maneja la reproducción física del audio."""
+        """Maneja la descarga, reproducción física y registro de estadísticas."""
         
-        # 1. VERIFICAR PRE-CARGA
-        # Si la canción que toca ya está descargada en memoria, la usamos directo
+        # 1. OBTENER EL REPRODUCTOR (Desde Buffer o Descarga)
         if self.preloaded_query == query and self.preloaded_player:
             player = self.preloaded_player
-            self.preloaded_player = None # Limpiamos para la siguiente
+            self.preloaded_player = None 
             self.preloaded_query = None
             await ctx.send(f"⚡ **Reproducción instantánea:** `{player.title}`")
         else:
-            # Si no estaba pre-cargada, la descargamos normal
             msg = await ctx.send(f"💿 Cargando: `{query}`...")
             player = await YTDLSource.from_query(query, loop=self.bot.loop)
             if not player:
                 return await msg.edit(content="❌ Error de descarga.")
             await msg.delete()
 
-        # 2. CONFIGURAR SIGUIENTE PASO
+        # 2. REGISTRO AUTOMÁTICO EN PERFILES
+        # Extraemos la duración (en segundos) que viene de los metadatos de yt-dlp
+        duracion_segundos = player.data.get('duration', 0)
+        
+        perfiles_cog = self.bot.get_cog('Perfiles')
+        if perfiles_cog:
+            # Llamamos a la función que actualizamos antes con el nuevo parámetro
+            await perfiles_cog.actualizar_stats(ctx, duracion=duracion_segundos)
+
+        # 3. CONFIGURAR SIGUIENTE PASO (Callback)
         def after_playing(error):
             if error: print(f"Error: {error}")
             asyncio.run_coroutine_threadsafe(self.play_next(ctx, player.filename), self.bot.loop)
 
+        # 4. REPRODUCIR
         ctx.voice_client.play(player, after=after_playing)
         await ctx.send(f"🎶 Sonando: **{player.title}**")
 
-        # 3. DISPARAR PRE-CARGA DE LA SIGUIENTE (Si hay cola)
+        # 5. DISPARAR PRE-CARGA DE LA SIGUIENTE
         if len(self.song_queue) > 0:
             next_song = self.song_queue[0]
             self.bot.loop.create_task(self.preload_next(next_song))
-
+            
+            
     # --- COMANDOS ---
 
     @commands.command(name='join')
@@ -147,10 +156,9 @@ class Musica(commands.Cog):
             await ctx.invoke(self.join)
 
         # --- LÓGICA DE PRE-CARGA (BUFFER) ---
-        # Si la canción ya está pre-descargada, evitamos el scraping/descarga lenta
         is_preloaded = hasattr(self, 'preloaded_query') and self.preloaded_query == query and self.preloaded_player is not None
 
-        # 2. PLAN B: Scraping para Spotify/Apple Music (Solo si NO está pre-cargada)
+        # 2. PLAN B: Scraping para Spotify/Apple Music
         if not is_preloaded and ("spotify.com" in query or "apple.com" in query):
             msg_espera = await ctx.send("🕵️ Extrayendo nombres de la playlist... (Esto puede tardar un poco)")
             try:
@@ -158,33 +166,25 @@ class Musica(commands.Cog):
                 res = requests.get(query, headers=headers, timeout=10)
                 soup = BeautifulSoup(res.text, 'html.parser')
                 
-                # Forma 1: Etiquetas Meta (Spotify clásico)
                 song_names = [s.get('content') for s in soup.find_all('meta', property="music:song") if s.get('content')]
                 
-                # Forma 2: Títulos (Apple Music o Spotify moderno)
                 if not song_names:
                     song_names = [t.text.split(' · song')[0] for t in soup.find_all('title') if "song" in t.text.lower()]
                 
-                # Forma 3: Búsqueda de respaldo en texto
-                if not song_names:
-                    song_names = [span.text for span in soup.find_all('span', dir='auto') if len(span.text) > 1][:15]
-
                 if not song_names:
                     await msg_espera.edit(content="⚠️ No pude leer la lista. Intentando reproducir el link directamente...")
                 else:
-                    # Limpieza y agregado a la cola
                     song_names = list(dict.fromkeys([s for s in song_names if s]))
                     for song in song_names:
                         self.song_queue.append(song)
                     
                     await msg_espera.edit(content=f"✅ ¡Éxito! Añadidas **{len(song_names)}** canciones a la cola.")
                     
-                    # Si no hay nada sonando, iniciamos la primera canción de la playlist
                     if not ctx.voice_client.is_playing():
-                        # REGISTRO DE PERFIL (Incrementa contador al usuario)
+                        # REGISTRO DE PERFIL (Para playlists no tenemos duración exacta de cada una aún)
                         perfiles_cog = self.bot.get_cog('Perfiles')
                         if perfiles_cog:
-                           await perfiles_cog.actualizar_stats(ctx)
+                            await perfiles_cog.actualizar_stats(ctx)
                            
                         await self.play_music(ctx, self.song_queue.pop(0))
                     return 
@@ -197,18 +197,26 @@ class Musica(commands.Cog):
             self.song_queue.append(query)
             await ctx.send(f"✅ En cola: `{query}`")
             
-            # Si es la primera en espera, disparamos la pre-carga para ganar tiempo
             if len(self.song_queue) == 1:
                 self.bot.loop.create_task(self.preload_next(self.song_queue[0]))
         else:
-            # REGISTRO DE PERFIL (Incrementa contador al usuario antes de sonar)
+            # --- INTEGRACIÓN CON PERFILES Y TIEMPO ---
             perfiles_cog = self.bot.get_cog('Perfiles')
-            if perfiles_cog:
-                await perfiles_cog.actualizar_stats(ctx)
-            
-            # Si no hay música, reproducimos inmediatamente (usará el buffer si existe)
-            await self.play_music(ctx, query)
+            duracion_segundos = 0
 
+            # Si está pre-cargada, sacamos la duración del buffer
+            if is_preloaded:
+                duracion_segundos = self.preloaded_player.data.get('duration', 0)
+            
+            # Si no está cargada, la play_music la descargará, pero necesitamos 
+            # registrar los stats. Lo ideal es hacerlo dentro de play_music o 
+            # extraer la info aquí. Para mantenerlo simple, play_music se encarga:
+            await self.play_music(ctx, query)
+            
+            # Si queremos ser precisos, play_music debería devolver el objeto player
+            # para registrar los segundos después de la descarga.
+            
+            
     @commands.command(name='stop')
     async def stop(self, ctx):
         self.song_queue = []

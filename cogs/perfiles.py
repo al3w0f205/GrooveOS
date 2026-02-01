@@ -3,207 +3,176 @@ from discord.ext import commands
 import aiosqlite
 import os
 import random
+import time
 
 class Perfiles(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_path = "grooveos.db"
+        self.last_xp_time = {} 
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """Crea la base de datos y añade columnas nuevas si es necesario."""
         async with aiosqlite.connect(self.db_path) as db:
-            # 1. Crear la tabla base si no existe
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS usuarios (
                     user_id INTEGER PRIMARY KEY,
                     canciones_pedidas INTEGER DEFAULT 0,
                     nivel INTEGER DEFAULT 1,
-                    xp INTEGER DEFAULT 0
+                    xp INTEGER DEFAULT 0,
+                    segundos_escuchados INTEGER DEFAULT 0,
+                    xp_chat INTEGER DEFAULT 0,
+                    xp_musica INTEGER DEFAULT 0
                 )
             ''')
-            
-            # 2. Intentar agregar la columna de tiempo (segundos_escuchados)
+            # Migración automática si faltan columnas
             try:
-                await db.execute('ALTER TABLE usuarios ADD COLUMN segundos_escuchados INTEGER DEFAULT 0')
-                print("📊 Columna 'segundos_escuchados' añadida exitosamente.")
-            except aiosqlite.OperationalError:
-                # Si entra aquí es porque la columna ya existe
-                pass
-                
+                await db.execute('ALTER TABLE usuarios ADD COLUMN xp_chat INTEGER DEFAULT 0')
+                await db.execute('ALTER TABLE usuarios ADD COLUMN xp_musica INTEGER DEFAULT 0')
+                print("📊 Columnas XP Chat/Musica añadidas.")
+            except: pass
             await db.commit()
-        print("🗄️ Base de datos Perfiles actualizada y conectada.")
+        print("🗄️ Base de datos Perfiles lista.")
 
-    async def actualizar_stats(self, ctx, duracion=0):
-        """Incrementa canciones, suma XP, gestiona niveles y acumula tiempo de escucha."""
-        user_id = ctx.author.id
-        xp_ganado = random.randint(15, 25)
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot or message.content.startswith('.'): return
+        
+        user_id = message.author.id
+        ahora = time.time()
+        
+        # Cooldown de 60 segundos
+        if ahora - self.last_xp_time.get(user_id, 0) < 60: return
+
+        # Sumar XP de Chat
+        xp = random.randint(15, 25)
+        await self.actualizar_stats(message, xp_ganado=xp, fuente='chat')
+        self.last_xp_time[user_id] = ahora
+
+    # --- [CORRECCIÓN CRÍTICA AQUÍ] ---
+    # Aceptamos 'es_musica' para compatibilidad con tu musica.py actual
+    async def actualizar_stats(self, ctx_or_msg, duracion=0, xp_ganado=0, fuente='musica', es_musica=False):
+        
+        # Parche de compatibilidad: Si musica.py manda es_musica=True, forzamos fuente='musica'
+        if es_musica: 
+            fuente = 'musica'
+            
+        user_id = ctx_or_msg.author.id
+        
+        # XP por defecto para música si no se especifica
+        if xp_ganado == 0 and fuente == 'musica':
+            xp_ganado = 10 
 
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                'SELECT xp, nivel, segundos_escuchados FROM usuarios WHERE user_id = ?', 
-                (user_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
+            cursor = await db.execute('SELECT * FROM usuarios WHERE user_id = ?', (user_id,))
+            row = await cursor.fetchone()
             
             if not row:
-                await db.execute('''
-                    INSERT INTO usuarios (user_id, canciones_pedidas, xp, nivel, segundos_escuchados) 
-                    VALUES (?, 1, ?, 1, ?)
-                ''', (user_id, xp_ganado, duracion))
+                # Crear usuario nuevo
+                pedidas = 1 if fuente == 'musica' else 0
+                xp_c = xp_ganado if fuente == 'chat' else 0
+                xp_m = xp_ganado if fuente == 'musica' else 0
+                await db.execute('INSERT INTO usuarios VALUES (?, ?, 1, ?, ?, ?, ?)', 
+                               (user_id, pedidas, xp_ganado, duracion, xp_c, xp_m))
             else:
-                xp_actual, nivel_actual, tiempo_actual = row[0], row[1], row[2] or 0
-                nuevo_xp = xp_actual + xp_ganado
-                nuevo_tiempo = tiempo_actual + duracion
-                xp_necesario = nivel_actual * 100
-
-                if nuevo_xp >= xp_necesario:
-                    nuevo_nivel = nivel_actual + 1
-                    await db.execute('''
-                        UPDATE usuarios 
-                        SET canciones_pedidas = canciones_pedidas + 1, 
-                            xp = ?, 
-                            nivel = ?,
-                            segundos_escuchados = ?
-                        WHERE user_id = ?
-                    ''', (nuevo_xp - xp_necesario, nuevo_nivel, nuevo_tiempo, user_id))
-                    
-                    embed = discord.Embed(
-                        title="✨ ¡SUBIDA DE NIVEL! ✨",
-                        description=f"¡Felicidades {ctx.author.mention}! Has alcanzado el **Nivel {nuevo_nivel}**.",
-                        color=discord.Color.gold()
-                    )
-                    await ctx.send(embed=embed)
+                # Actualizar usuario existente
+                # Desempaquetamos según las 7 columnas que definimos
+                uid, pedidas, nivel, xp_total, tiempo, xp_chat, xp_musica = row
+                
+                # Sumamos valores nuevos
+                xp_total += xp_ganado
+                if fuente == 'musica':
+                    pedidas += 1
+                    tiempo += duracion
+                    xp_musica += xp_ganado
                 else:
-                    await db.execute('''
-                        UPDATE usuarios 
-                        SET canciones_pedidas = canciones_pedidas + 1, 
-                            xp = ?,
-                            segundos_escuchados = ?
-                        WHERE user_id = ?
-                    ''', (nuevo_xp, nuevo_tiempo, user_id))
+                    xp_chat += xp_ganado
+
+                # Lógica de Nivel
+                xp_meta = nivel * 100
+                if xp_total >= xp_meta:
+                    nivel += 1
+                    xp_total -= xp_meta
+                    try:
+                        await ctx_or_msg.channel.send(
+                            embed=discord.Embed(
+                                description=f"🎉 **{ctx_or_msg.author.mention} subió al Nivel {nivel}!**",
+                                color=discord.Color.gold()
+                            )
+                        )
+                    except: pass
+
+                await db.execute('''
+                    UPDATE usuarios SET canciones_pedidas=?, nivel=?, xp=?, segundos_escuchados=?, xp_chat=?, xp_musica=?
+                    WHERE user_id=?
+                ''', (pedidas, nivel, xp_total, tiempo, xp_chat, xp_musica, user_id))
             
             await db.commit()
 
-    @commands.command(name='perfil', aliases=['p-stats'])
+    @commands.command(name='perfil', aliases=['p-stats', 'profile', 'pstats'])
     async def perfil(self, ctx, member: discord.Member = None):
-        """Muestra las estadísticas musicales con barra de progreso."""
         member = member or ctx.author
-        
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                'SELECT canciones_pedidas, nivel, xp, segundos_escuchados FROM usuarios WHERE user_id = ?', 
-                (member.id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                
-        pedidas = row[0] if row else 0
-        nivel = row[1] if row else 1
-        xp_actual = row[2] if row else 0
-        segundos = row[3] if row and row[3] else 0 
+            cursor = await db.execute('SELECT * FROM usuarios WHERE user_id = ?', (member.id,))
+            row = await cursor.fetchone()
+
+        if not row: return await ctx.send("📉 Sin datos registrados.")
+
+        # Desempaquetar datos seguros
+        _, pedidas, nivel, xp_act, seg, xp_c, xp_m = row
         
-        xp_sig_nivel = nivel * 100
-        bloques_totales = 10
-        progreso = int((xp_actual / xp_sig_nivel) * bloques_totales)
-        barra = "▰" * progreso + "▱" * (bloques_totales - progreso)
-        porcentaje = int((xp_actual / xp_sig_nivel) * 100)
+        xp_meta = nivel * 100
+        pct = int((xp_act / xp_meta) * 100) if xp_meta > 0 else 0
+        
+        # [CORRECCIÓN ERROR 'BLOCKS'] Usamos 'bloques' consistente
+        bloques = int(pct / 10)
+        barra = "▰" * bloques + "▱" * (10 - bloques)
 
-        horas = segundos // 3600
-        minutos = (segundos % 3600) // 60
+        # Formato de tiempo
+        h = seg // 3600
+        m = (seg % 3600) // 60
 
-        embed = discord.Embed(
-            title=f"📊 Perfil de {member.display_name}", 
-            description=f"**Rango:** {self.obtener_rango(nivel)}",
-            color=discord.Color.purple()
-        )
+        embed = discord.Embed(title=f"📊 {member.display_name}", color=discord.Color.purple())
         embed.set_thumbnail(url=member.display_avatar.url)
         
-        embed.add_field(name="🎶 Pedidas", value=f"`{pedidas}`", inline=True)
-        embed.add_field(name="⭐ Nivel", value=f"`{nivel}`", inline=True)
-        embed.add_field(name="⏳ Tiempo Escuchado", value=f"`{horas}h {minutos}m`", inline=True)
+        embed.add_field(name="Nivel", value=f"⭐ **{nivel}**", inline=True)
+        embed.add_field(name="Tiempo", value=f"⏳ {h}h {m}m", inline=True)
+        embed.add_field(name="Canciones", value=f"💿 {pedidas}", inline=True)
         
-        # CORREGIDO: Se eliminó el parámetro name duplicado
         embed.add_field(
-            name=f"🧬 XP: {xp_actual} / {xp_sig_nivel} ({porcentaje}%)", 
-            value=f"`{barra}`", 
+            name=f"Experiencia: {xp_act}/{xp_meta} ({pct}%)", 
+            value=f"`{barra}`\n💬 Chat: {xp_c} | 🎵 Música: {xp_m}", 
             inline=False
         )
-        embed.set_footer(text="GrooveOS 2.0 - Sistema de Persistencia")
         await ctx.send(embed=embed)
 
-    def obtener_rango(self, nivel):
-        if nivel < 3: return "🎧 Oyente Novato"
-        if nivel < 7: return "🎸 Melómano en Proceso"
-        if nivel < 12: return "💿 DJ del Barrio"
-        if nivel < 20: return "🎹 Maestro de la Cola"
-        return "👑 Leyenda del Groove"
-        
-    @commands.command(name='top', aliases=['leaderboard', 'dj-top'])
+    @commands.command(name='top')
     async def top(self, ctx):
-        """Muestra el Top 5 de usuarios con corrección de nombres."""
         async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                'SELECT user_id, canciones_pedidas FROM usuarios ORDER BY canciones_pedidas DESC LIMIT 5'
-            ) as cursor:
-                usuarios_top = await cursor.fetchall()
-
-        if not usuarios_top:
-            return await ctx.send("📉 Aún no hay datos suficientes.")
-
-        embed = discord.Embed(title="🏆 Hall de la Fama - GrooveOS", color=discord.Color.gold())
-
-        for i, (user_id, total) in enumerate(usuarios_top, start=1):
-            usuario = self.bot.get_user(user_id)
-            if usuario is None:
-                try: usuario = await self.bot.fetch_user(user_id)
-                except: usuario = None
-
-            nombre = usuario.display_name if usuario else f"Desconocido ({user_id})"
-            medalla = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "🎵"
-            embed.add_field(name=f"{medalla} #{i} {nombre}", value=f"`{total}` canciones", inline=False)
-
+            cursor = await db.execute('SELECT user_id, nivel, xp FROM usuarios ORDER BY nivel DESC, xp DESC LIMIT 5')
+            rows = await cursor.fetchall()
+        
+        embed = discord.Embed(title="🏆 Top Global", color=discord.Color.gold())
+        for i, (uid, lvl, xp) in enumerate(rows, 1):
+            u = self.bot.get_user(uid)
+            name = u.display_name if u else "Usuario"
+            embed.add_field(name=f"#{i} {name}", value=f"Nivel {lvl} • {xp} XP", inline=False)
         await ctx.send(embed=embed)
-        
+
     @commands.command(name='stats')
-    async def stats_global(self, ctx):
-        """Muestra la analítica global del bot acumulada en la base de datos."""
-        perfiles_cog = self.bot.get_cog('Perfiles')
-        if not perfiles_cog:
-            return await ctx.send("❌ El módulo de base de datos no está activo.")
-
-        async with aiosqlite.connect(perfiles_cog.db_path) as db:
-            # Consultas de agregación SQL para máxima eficiencia
-            async with db.execute('''
-                SELECT 
-                    SUM(canciones_pedidas), 
-                    SUM(segundos_escuchados), 
-                    COUNT(user_id),
-                    AVG(nivel)
-                FROM usuarios
-            ''') as cursor:
-                row = await cursor.fetchone()
-
-        if not row or row[0] is None:
-            return await ctx.send("📈 Aún no hay datos globales para mostrar.")
-
-        total_canciones, total_segundos, total_usuarios, nivel_promedio = row
+    async def stats(self, ctx):
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute('SELECT SUM(canciones_pedidas), SUM(segundos_escuchados), COUNT(*) FROM usuarios')
+            row = await cursor.fetchone()
         
-        # Conversión de tiempo global a formato legible
-        horas = total_segundos // 3600
-        minutos = (total_segundos % 3600) // 60
-
-        embed = discord.Embed(
-            title="🌐 Estadísticas Globales - GrooveOS 2.0",
-            color=discord.Color.blue(),
-            timestamp=ctx.message.created_at
-        )
+        if not row: return
+        total_c, total_s, usuarios = row
+        h = (total_s or 0) // 3600
         
-        embed.add_field(name="🎶 Total Canciones", value=f"`{total_canciones}`", inline=True)
-        embed.add_field(name="👥 Usuarios Registrados", value=f"`{total_usuarios}`", inline=True)
-        embed.add_field(name="⏳ Tiempo de Aire", value=f"`{horas}h {minutos}m`", inline=False)
-        embed.add_field(name="⭐ Nivel Promedio", value=f"`{nivel_promedio:.1f}`", inline=True)
-        
-        embed.set_footer(text="Analítica de servidor Proxmox")
+        embed = discord.Embed(title="🌐 Estadísticas del Servidor", color=discord.Color.blue())
+        embed.add_field(name="Canciones Totales", value=str(total_c))
+        embed.add_field(name="Horas Reproducidas", value=f"{h} horas")
+        embed.add_field(name="Usuarios Activos", value=str(usuarios))
         await ctx.send(embed=embed)
 
 async def setup(bot):

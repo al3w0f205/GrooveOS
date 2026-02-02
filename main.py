@@ -14,17 +14,20 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 
-# 3. Función para cargar automáticamente musica.py y minecraft.py de la carpeta /cogs
+# ✅ Archivos que NO son extensiones (helpers)
+SKIP_FILES = {'__init__.py', 'utilidad.py'}
+
+# 3. Función para cargar automáticamente los cogs en /cogs
 async def load_extensions():
-    # Asegúrate de que la carpeta cogs existe en /root/
     for filename in os.listdir('./cogs'):
-        if filename.endswith('.py') and filename != '__init__.py':
-            try:
-                # Esto carga cada "rama" de código
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f"✅ Módulo cargado con éxito: {filename}")
-            except Exception as e:
-                print(f"❌ Error al cargar {filename}: {e}")
+        if not filename.endswith('.py') or filename in SKIP_FILES:
+            continue
+
+        try:
+            await bot.load_extension(f'cogs.{filename[:-3]}')
+            print(f"✅ Módulo cargado con éxito: {filename}")
+        except Exception as e:
+            print(f"❌ Error al cargar {filename}: {e}")
 
 @bot.event
 async def on_ready():
@@ -32,39 +35,46 @@ async def on_ready():
     print(f'🚀 {bot.user} está ONLINE y Modularizado')
     print('---')
 
-# COMANDO AYUDA - HELP PERSONALIZADO
+# ✅ HELP AUTOMÁTICO
 @bot.command(name="help")
 async def custom_help(ctx):
-    """Despliega la lista de comandos disponibles de forma organizada."""
+    """Help automático: agrupa comandos por Cog y muestra uso + descripción."""
+    prefix = "."
+
     embed = discord.Embed(
         title="📚 Guía de Comandos - GrooveOS",
-        description="Lista de funciones para gestionar el servidor y la música.",
-        color=0x3498db  # Color azul pro
+        description=f"Prefijo actual: `{prefix}`\nUsa `{prefix}help` para ver esto.",
+        color=discord.Color.blurple()
     )
 
-    # Sección de Minecraft
-    embed.add_field(
-        name="🎮 Servidor Minecraft",
-        value="`.mc` o `.minecraft` - Panel de control iniciar el server de minecraft.",
-        inline=False
-    )
+    cogs = {}
+    for cmd in bot.commands:
+        if cmd.hidden:
+            continue
+        cog_name = cmd.cog_name or "Otros"
+        cogs.setdefault(cog_name, []).append(cmd)
 
-    # Sección de Música
-    embed.add_field(
-        name="🎶 Música",
-        value=(
-            "`.p [nombre/url]` - Reproduce Spotify, Apple Music o YouTube.\n"
-            "`.join` - Une al bot al canal.\n"
-            "`.stop` - Detiene la música y limpia la cola.\n"
-            "`.skip` - Salta a la siguiente canción.\n"
-        ),
-        inline=False
-    )
+    for cog_name, cmds in sorted(cogs.items(), key=lambda x: x[0].lower()):
+        lines = []
+        for cmd in sorted(cmds, key=lambda c: c.name):
+            usage = f"{prefix}{cmd.name}"
+            if cmd.signature:
+                usage += f" {cmd.signature}"
 
-    # Pie de página con avatar del usuario
-    avatar_url = ctx.author.avatar.url if ctx.author.avatar else None
-    embed.set_footer(text=f"Solicitado por {ctx.author.name}", icon_url=avatar_url)
-    
+            alias_txt = ""
+            if cmd.aliases:
+                alias_txt = " (alias: " + ", ".join([f"`{prefix}{a}`" for a in cmd.aliases]) + ")"
+
+            short = (cmd.help or "Sin descripción").strip().split("\n")[0]
+            lines.append(f"**`{usage}`**{alias_txt}\n└ {short}")
+
+        value = "\n".join(lines)
+        if len(value) > 1024:
+            value = value[:1020] + "…"
+
+        embed.add_field(name=f"📦 {cog_name}", value=value, inline=False)
+
+    embed.set_footer(text=f"Solicitado por {ctx.author}", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
 # 4. Función principal de arranque

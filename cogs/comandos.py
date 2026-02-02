@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from .utilidad import THEME, user_footer, build_embed, clean_query
 
 class Comandos(commands.Cog):
     def __init__(self, bot):
@@ -7,45 +8,53 @@ class Comandos(commands.Cog):
 
     @commands.command(name='hola')
     async def hola(self, ctx):
-        """Un saludo amistoso del bot"""
         await ctx.send(f'👋 ¡Hola, {ctx.author.name}! ¿En qué puedo ayudarte hoy?')
 
     @commands.command(name='info')
     async def info(self, ctx):
-        """Muestra información básica de GrooveOS 2.0"""
-        embed = discord.Embed(
-            title="🤖 GrooveOS 2.0",
-            description="Tu bot personal de música y utilidad, optimizado y modular.",
-            color=discord.Color.blue()
+        embed = build_embed(
+            "🤖 GrooveOS 2.0",
+            "Tu bot personal de música y utilidad, optimizado y modular.",
+            color=THEME["primary"]
         )
         embed.add_field(name="Versión", value="2.0.0-Beta", inline=True)
         embed.add_field(name="Prefijo", value="`.`", inline=True)
         embed.add_field(name="Desarrollador", value="Alejandro", inline=False)
-        embed.set_footer(text="Proyecto personal de ingeniería.")
+        embed.set_footer(**user_footer(ctx, "Proyecto personal de ingeniería"))
         await ctx.send(embed=embed)
 
     @commands.command(name='queue', aliases=['q', 'cola'])
     async def queue(self, ctx):
-        """Muestra las canciones que están en la cola de reproducción"""
-        # Accedemos al Cog de música para obtener la lista
         musica_cog = self.bot.get_cog('Musica')
-        
-        if not musica_cog or not musica_cog.song_queue:
-            return await ctx.send("📭 La cola está vacía actualmente.")
+        if not musica_cog:
+            return await ctx.send("⚠️ No encontré el módulo de música cargado.")
 
-        # Construimos la lista de canciones
-        lista_cola = ""
-        for i, song in enumerate(musica_cog.song_queue[:10], start=1):
-            lista_cola += f"**{i}.** {song}\n"
+        if not musica_cog.song_queue:
+            embed = build_embed(
+                "📭 Cola Vacía",
+                "No hay canciones en espera.\nUsa `.p <nombre/url>` para agregar música.",
+                color=THEME["warning"]
+            )
+            embed.set_footer(**user_footer(ctx))
+            return await ctx.send(embed=embed)
 
-        if len(musica_cog.song_queue) > 10:
-            lista_cola += f"\n*...y {len(musica_cog.song_queue) - 10} canciones más.*"
+        max_items = 10
+        items = musica_cog.song_queue[:max_items]
 
-        embed = discord.Embed(
-            title="🎶 Cola de Reproducción",
-            description=lista_cola,
-            color=discord.Color.green()
+        lista_cola = "\n".join([f"**{i}.** {clean_query(song)}" for i, song in enumerate(items, start=1)])
+        extra = len(musica_cog.song_queue) - max_items
+        if extra > 0:
+            lista_cola += f"\n\n*…y **{extra}** canciones más.*"
+
+        ahora = getattr(musica_cog, "current_track", None)
+        ahora_txt = f"🎧 **Ahora sonando:** `{clean_query(ahora)}`\n\n" if ahora else ""
+
+        embed = build_embed(
+            "🎶 Cola de Reproducción",
+            ahora_txt + lista_cola,
+            color=THEME["success"]
         )
+        embed.set_footer(**user_footer(ctx))
         await ctx.send(embed=embed)
 
 async def setup(bot):

@@ -1,50 +1,66 @@
 import discord
-from discord.ext import commands
 import datetime
 
-class Utilidad(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        # Reemplaza esto con el ID real de tu canal de logs
-        self.ID_CANAL_LOGS = 1467098761049407603 
+# =========================
+# 🎨 TEMA GLOBAL (Estilo A)
+# =========================
+THEME = {
+    "primary": discord.Color.blurple(),
+    "success": discord.Color.green(),
+    "danger": discord.Color.red(),
+    "warning": discord.Color.orange(),
+    "neutral": discord.Color.dark_grey(),
+}
 
-    async def enviar_log(self, titulo, descripcion, color=discord.Color.blue()):
-        """Función interna para enviar reportes al canal de logs"""
-        canal = self.bot.get_channel(self.ID_CANAL_LOGS)
-        if canal:
-            embed = discord.Embed(
-                title=titulo,
-                description=descripcion,
-                color=color,
-                timestamp=datetime.datetime.utcnow()
-            )
-            embed.set_footer(text="GrooveOS Monitoring")
-            await canal.send(embed=embed)
+def user_footer(ctx, extra: str | None = None):
+    """Footer consistente con avatar del usuario."""
+    base = f"Solicitado por {ctx.author}"
+    text = f"{base} • {extra}" if extra else base
+    return {"text": text, "icon_url": ctx.author.display_avatar.url}
 
-    @commands.Cog.listener()
-    async def on_command(self, ctx):
-        """Registra cada vez que alguien usa un comando"""
-        log_msg = f"👤 **Usuario:** {ctx.author}\n💻 **Comando:** `{ctx.command}`\n📍 **Canal:** {ctx.channel.name}"
-        await self.enviar_log("📝 Comando Ejecutado", log_msg)
+def clean_query(text: str) -> str:
+    """Evita que el texto rompa embeds o se vea gigante."""
+    text = (text or "").strip()
+    return text[:200] + "…" if len(text) > 200 else text
 
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        """Captura errores y los reporta al canal privado"""
-        if isinstance(error, commands.CommandNotFound):
-            return
+def fmt_time(seconds: int) -> str:
+    """0:00 / 1:23:45"""
+    seconds = max(0, int(seconds))
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
-        error_msg = f"❌ **Error en:** `{ctx.command}`\n⚠️ **Detalle:** `{error}`"
-        await self.enviar_log("🚨 Error Detectado", error_msg, color=discord.Color.red())
-        
-        # Feedback al usuario en el canal público
-        await ctx.send(f"⚠️ Hubo un problema al ejecutar el comando. El error ha sido reportado a Alejandro.")
+def progress_bar(elapsed: float, total: float, length: int = 18):
+    """Barra minimalista tipo Spotify: ▬▬▬🔘▬▬▬ + porcentaje."""
+    if total <= 0:
+        return "🔘" + "▬" * length, 0
 
-    @commands.command(name='clear')
-    @commands.has_permissions(manage_messages=True)
-    async def clear(self, ctx, cantidad: int):
-        """Limpia el chat (Útil para canales de música)"""
-        await ctx.channel.purge(limit=cantidad + 1)
-        msg = await ctx.send(f"🧹 Se han borrado {cantidad} mensajes.", delete_after=5)
+    elapsed = max(0.0, min(float(elapsed), float(total)))
+    ratio = elapsed / total
+    pos = min(int(ratio * length), length - 1)
 
-async def setup(bot):
-    await bot.add_cog(Utilidad(bot))
+    bar = "▬" * pos + "🔘" + "▬" * (length - 1 - pos)
+    return bar, int(ratio * 100)
+
+def short_queue_preview(queue: list[str], limit: int = 3) -> str:
+    """Preview elegante de próximas canciones."""
+    if not queue:
+        return "—"
+    items = queue[:limit]
+    lines = [f"`{i+1}.` {clean_query(q)}" for i, q in enumerate(items)]
+    extra = len(queue) - limit
+    if extra > 0:
+        lines.append(f"*…y **{extra}** más.*")
+    return "\n".join(lines)
+
+def build_embed(title: str, desc: str = "", color: discord.Color | None = None):
+    """Constructor base para embeds consistentes."""
+    e = discord.Embed(
+        title=title,
+        description=desc,
+        color=color or THEME["primary"],
+        timestamp=datetime.datetime.now(datetime.timezone.utc)
+    )
+    return e

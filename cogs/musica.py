@@ -10,157 +10,25 @@ import random
 import time
 import re
 import difflib
+import json
 from collections import deque
+from urllib.parse import urlparse
 
 from .utilidad import THEME, user_footer, fmt_time, short_queue_preview, clean_query
 
-# ==========================================
-# ⚙️ CONFIGURACIÓN DE AUDIO (Proxmox-safe)
-# ==========================================
-YTDL_OPTIONS = {
-    "format": "bestaudio/best",
-    "outtmpl": "cache_audio/%(extractor)s-%(id)s-%(title)s.%(ext)s",
-    "restrictfilenames": True,
-    "windowsfilenames": True,
-    "overwrites": True,
-    "noplaylist": True,
-    "nocheckcertificate": True,
-    "ignoreerrors": False,
-    "quiet": True,
-    "no_warnings": True,
-    "default_search": "auto",
-    "source_address": "0.0.0.0",
-}
-
-# ✅ Estabilidad Discord Voice (48kHz/2ch) + reconexión
-FFMPEG_OPTIONS = {
-    "options": "-vn -loglevel quiet -ar 48000 -ac 2 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-}
-
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
-
-# ==========================================
-# 🎧 AUTOPLAY SETTINGS (estricto)
-# ==========================================
-AUTOPLAY_MAX_DURATION = 10 * 60   # máx 10 min (evita mixes largos)
-AUTOPLAY_MIN_DURATION = 45        # min 45s
-AUTOPLAY_MIN_OVERLAP = 3          # ✅ mínimo 3 palabras en común
-AUTOPLAY_COOLDOWN = 2.0           # ✅ anti doble-trigger (skip spam)
-
-# ==========================================
-# 🧨 AUTOPLAY PARANOID (anti-duplicados fuerte)
-# ==========================================
-AUTOPLAY_PARANOID = True
-
-# similitud alta => se considera el mismo tema aunque otro canal/ID
-AUTOPLAY_DUP_SIM_THRESHOLD = 0.92
-
-# si comparten demasiadas palabras clave en el core title => duplicado
-AUTOPLAY_DUP_TOKEN_OVERLAP = 0.78  # (0-1) más alto = más estricto
-
-# cuántos títulos recientes recordar para bloquear repetidos cercanos
-AUTOPLAY_RECENT_BUFFER = 80
+# ✅ IMPORTS nuevos (desde la carpeta cogs/music/)
+from .music.config import (
+    AUTOPLAY_MAX_DURATION, AUTOPLAY_MIN_DURATION, AUTOPLAY_MIN_OVERLAP, AUTOPLAY_COOLDOWN,
+    AUTOPLAY_PARANOID, AUTOPLAY_DUP_SIM_THRESHOLD, AUTOPLAY_DUP_TOKEN_OVERLAP, AUTOPLAY_RECENT_BUFFER,
+    SCRAPE_TIMEOUT, MAX_SCRAPED_TRACKS, MAX_IMPORT_LINES, MAX_YT_PLAYLIST_ITEMS, IMPORT_WAIT_SECONDS,
+    UA_HEADERS, YTDL_OPTIONS
+)
+from .music.source import YTDLSource
+from .music.ui import ControlesMusica
 
 
 # ==========================================
-# 🎵 FUENTE DE AUDIO
-# ==========================================
-class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
-        self.data = data
-        self.title = data.get("title")
-        self.filename = ytdl.prepare_filename(data)
-
-    @classmethod
-    async def from_query(cls, query, *, loop=None):
-        loop = loop or asyncio.get_event_loop()
-        try:
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=True))
-            if "entries" in data:
-                data = data["entries"][0]
-            filename = ytdl.prepare_filename(data)
-            return cls(discord.FFmpegPCMAudio(filename, **FFMPEG_OPTIONS), data=data)
-        except Exception as e:
-            print(f"❌ Error YTDL: {e}")
-            return None
-
-
-# ==========================================
-# 🎮 BOTONES (UI)
-# ==========================================
-class ControlesMusica(discord.ui.View):
-    def __init__(self, ctx, cog, query):
-        super().__init__(timeout=None)
-        self.ctx = ctx
-        self.cog = cog
-        self.query = query
-
-        # Color inicial del botón Loop (🔁)
-        for child in self.children:
-            if isinstance(child, discord.ui.Button) and str(child.emoji) == "🔁":
-                child.style = discord.ButtonStyle.primary if self.cog.loop_enabled else discord.ButtonStyle.secondary
-
-    async def refresh_panel(self):
-        if not self.cog.panel_msg or not self.cog.panel_data:
-            return
-        vc = self.ctx.voice_client
-        paused = vc.is_paused() if vc else False
-        embed = self.cog.build_now_playing_embed(self.ctx, paused=paused)
-        try:
-            await self.cog.panel_msg.edit(embed=embed, view=self)
-        except Exception:
-            pass
-
-    # ✅ PAUSA / RESUME (silencioso) — fila 0
-    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.secondary, row=0)
-    async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        vc = self.ctx.voice_client
-        if not vc:
-            return
-
-        if vc.is_paused():
-            vc.resume()
-        elif vc.is_playing():
-            vc.pause()
-
-        await self.refresh_panel()
-
-    # ✅ SKIP (silencioso) — fila 0
-    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary, row=0)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        vc = self.ctx.voice_client
-        if vc:
-            vc.stop()  # after_playing -> play_next -> autoplay si procede
-
-    # ✅ LOOP (silencioso + cambia color) — fila 0
-    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary, row=0)
-    async def loop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.cog.loop_enabled = not self.cog.loop_enabled
-        button.style = discord.ButtonStyle.primary if self.cog.loop_enabled else discord.ButtonStyle.secondary
-        await interaction.response.edit_message(view=self)
-        await self.refresh_panel()
-
-    # ✅ STOP (silencioso) — fila 0
-    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.secondary, row=0)
-    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        await self.cog.stop_all(self.ctx, leave_panel=True)
-
-    # ✅ SHUFFLE (silencioso) — fila 0
-    @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.secondary, row=0)
-    async def shuffle_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        if len(self.cog.song_queue) < 2:
-            return
-        random.shuffle(self.cog.song_queue)
-        await self.refresh_panel()
-
-
-# ==========================================
-# 🎧 COG MÚSICA
+# COG MÚSICA
 # ==========================================
 class Musica(commands.Cog):
     def __init__(self, bot):
@@ -186,20 +54,20 @@ class Musica(commands.Cog):
         self.panel_ctx = None
         self.panel_view = None
 
-        # ✅ Autoplay (Radio) — Mix C
+        # Autoplay
         self.autoplay_enabled = True
         self._autoplay_flip = False
-        self.autoplay_history = []          # ids/urls para no repetir (cap)
-        self.autoplay_fingerprints = set()  # ✅ anti-repeat fuerte por "huella"
+        self.autoplay_history = []
+        self.autoplay_fingerprints = set()
         self.autoplay_lock = asyncio.Lock()
         self.last_autoplay_time = 0.0
         self.autoplay_cooldown = AUTOPLAY_COOLDOWN
 
-        # 🧨 Paranoid buffers (anti-repeat cross-channel/ID)
-        self.autoplay_core_fingerprints = set()         # core title fingerprints (sin uploader)
+        # Paranoid buffers
+        self.autoplay_core_fingerprints = set()
         self.autoplay_recent_core_titles = deque(maxlen=AUTOPLAY_RECENT_BUFFER)
 
-        # Cargar Opus (Linux/LXC)
+        # Cargar Opus
         opus_path = ctypes.util.find_library("opus")
         if opus_path:
             try:
@@ -210,7 +78,7 @@ class Musica(commands.Cog):
         os.makedirs("cache_audio", exist_ok=True)
 
     # -------------------------
-    # Utils Proxmox-safe
+    # Utils
     # -------------------------
     def cleanup_file(self, filename):
         if filename and os.path.exists(filename):
@@ -233,7 +101,6 @@ class Musica(commands.Cog):
                 pass
 
     def _has_listeners(self, vc: discord.VoiceClient) -> bool:
-        """True si hay humanos (no bots) en el canal de voz."""
         try:
             if not vc or not vc.channel:
                 return False
@@ -258,6 +125,287 @@ class Musica(commands.Cog):
             print(f"❌ Error en pre-carga: {e}")
 
     # -------------------------
+    # 🔎 Playlist / import helpers
+    # -------------------------
+    def _is_youtube_playlist(self, q: str) -> bool:
+        q = (q or "").strip()
+        if "youtube.com/playlist" in q:
+            return True
+        if "list=" in q and ("youtube.com" in q or "youtu.be" in q):
+            return True
+        return False
+
+    def _is_spotify(self, q: str) -> bool:
+        return "open.spotify.com" in (q or "")
+
+    def _is_applemusic(self, q: str) -> bool:
+        return "music.apple.com" in (q or "")
+
+    def _spotify_embed_url(self, url: str) -> str:
+        try:
+            u = urlparse(url)
+            parts = u.path.strip("/").split("/")
+            if len(parts) >= 2 and parts[0] == "playlist":
+                return f"https://open.spotify.com/embed/playlist/{parts[1]}"
+        except Exception:
+            pass
+        return url
+
+    def _dedupe_keep_order(self, items):
+        seen = set()
+        out = []
+        for x in items:
+            x = (x or "").strip()
+            if not x:
+                continue
+            if x in seen:
+                continue
+            seen.add(x)
+            out.append(x)
+        return out
+
+    def _clean_track_text(self, s: str) -> str:
+        s = (s or "").strip()
+        s = re.sub(r"\s+", " ", s)
+        s = s.replace("–", "-").replace("—", "-")
+        return s.strip()
+
+    def _extract_names_from_jsonld(self, soup: BeautifulSoup) -> list[str]:
+        tracks = []
+        for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+            try:
+                raw = script.string
+                if not raw:
+                    continue
+                data = json.loads(raw)
+                candidates = data if isinstance(data, list) else [data]
+                for obj in candidates:
+                    if not isinstance(obj, dict):
+                        continue
+
+                    ile = obj.get("itemListElement") or []
+                    for it in ile:
+                        if isinstance(it, dict):
+                            name = it.get("name")
+                            if name:
+                                tracks.append(self._clean_track_text(name))
+                            item = it.get("item") or {}
+                            if isinstance(item, dict):
+                                name2 = item.get("name")
+                                if name2:
+                                    tracks.append(self._clean_track_text(name2))
+
+                    tr = obj.get("track") or []
+                    if isinstance(tr, list):
+                        for t in tr:
+                            if isinstance(t, dict) and t.get("name"):
+                                tracks.append(self._clean_track_text(t["name"]))
+            except Exception:
+                continue
+        return tracks
+
+    def _extract_names_spotify(self, html: str) -> list[str]:
+        soup = BeautifulSoup(html, "html.parser")
+
+        meta_tracks = [
+            m.get("content")
+            for m in soup.find_all("meta", property="music:song")
+            if m.get("content")
+        ]
+
+        jsonld_tracks = self._extract_names_from_jsonld(soup)
+
+        regex_tracks = []
+        for m in re.finditer(r'"name"\s*:\s*"([^"]{2,120})"\s*,\s*"uri"\s*:\s*"spotify:track:', html):
+            regex_tracks.append(self._clean_track_text(m.group(1)))
+
+        tracks = self._dedupe_keep_order(meta_tracks + jsonld_tracks + regex_tracks)
+        return tracks[:MAX_SCRAPED_TRACKS]
+
+    def _extract_names_apple(self, html: str) -> list[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        jsonld_tracks = self._extract_names_from_jsonld(soup)
+
+        regex_tracks = []
+        for m in re.finditer(r'"name"\s*:\s*"([^"]{2,120})"\s*,\s*"@type"\s*:\s*"MusicRecording"', html):
+            regex_tracks.append(self._clean_track_text(m.group(1)))
+
+        tracks = self._dedupe_keep_order(jsonld_tracks + regex_tracks)
+        return tracks[:MAX_SCRAPED_TRACKS]
+
+    async def scrape_playlist_to_yt_queries(self, url: str) -> list[str]:
+        try:
+            fetch_url = self._spotify_embed_url(url) if self._is_spotify(url) else url
+            r = requests.get(fetch_url, headers=UA_HEADERS, timeout=SCRAPE_TIMEOUT)
+            html = r.text or ""
+
+            if self._is_spotify(url):
+                names = self._extract_names_spotify(html)
+            elif self._is_applemusic(url):
+                names = self._extract_names_apple(html)
+            else:
+                names = []
+
+            # spotify: si embed no funcionó, intenta normal
+            if self._is_spotify(url) and not names and fetch_url != url:
+                r2 = requests.get(url, headers=UA_HEADERS, timeout=SCRAPE_TIMEOUT)
+                names = self._extract_names_spotify(r2.text or "")
+
+            out = []
+            for name in names:
+                name = self._clean_track_text(name)
+                if not name:
+                    continue
+                out.append(f"ytsearch1:{name} audio")
+
+            return out[:MAX_SCRAPED_TRACKS]
+        except Exception as e:
+            print(f"❌ scrape_playlist_to_yt_queries error: {e}")
+            return []
+
+    async def expand_youtube_playlist(self, url: str) -> list[str]:
+        loop = self.bot.loop
+        try:
+            opts = dict(YTDL_OPTIONS)
+            opts.update({
+                "noplaylist": False,
+                "extract_flat": "in_playlist",
+                "skip_download": True,
+                "quiet": True,
+                "no_warnings": True,
+                "ignoreerrors": True,
+            })
+            ydlp = yt_dlp.YoutubeDL(opts)
+            info = await loop.run_in_executor(None, lambda: ydlp.extract_info(url, download=False))
+            entries = (info or {}).get("entries") or []
+            out = []
+            for e in entries:
+                if not e:
+                    continue
+                vid = e.get("id") or e.get("url")
+                if not vid:
+                    continue
+                if isinstance(vid, str) and vid.startswith("http"):
+                    out.append(vid)
+                else:
+                    out.append(f"https://www.youtube.com/watch?v={vid}")
+                if len(out) >= MAX_YT_PLAYLIST_ITEMS:
+                    break
+            return out
+        except Exception as e:
+            print(f"❌ expand_youtube_playlist error: {e}")
+            return []
+
+    async def enqueue_many(self, ctx, queries: list[str]):
+        if not queries:
+            return False
+        for q in queries:
+            self.song_queue.append(q)
+
+        if not ctx.voice_client.is_playing() and not ctx.voice_client.is_paused():
+            await self.play_music(ctx, self.song_queue.pop(0))
+        else:
+            if len(self.song_queue) == 1:
+                self.bot.loop.create_task(self.preload_next(self.song_queue[0]))
+        return True
+
+    async def _read_attachment_to_lines(self, attachment: discord.Attachment) -> list[str]:
+        try:
+            fname = (attachment.filename or "").lower()
+            if not (fname.endswith(".txt") or fname.endswith(".csv")):
+                return []
+
+            data = await attachment.read()
+            text = data.decode("utf-8", errors="ignore")
+
+            lines = []
+            if fname.endswith(".txt"):
+                lines = [self._clean_track_text(x) for x in text.splitlines()]
+                lines = [x for x in lines if x]
+                return lines[:MAX_IMPORT_LINES]
+
+            raw_lines = text.splitlines()
+            if not raw_lines:
+                return []
+
+            sep = "," if "," in raw_lines[0] else ";"
+            cols = [c.strip() for c in raw_lines[0].split(sep)]
+            col_map = {c.lower(): i for i, c in enumerate(cols)}
+
+            track_keys = ["track", "title", "song", "name"]
+            artist_keys = ["artist", "artists", "band"]
+
+            track_idx = next((col_map[k] for k in track_keys if k in col_map), None)
+            artist_idx = next((col_map[k] for k in artist_keys if k in col_map), None)
+
+            for row in raw_lines[1:]:
+                parts = [p.strip() for p in row.split(sep)]
+                if not parts:
+                    continue
+
+                if track_idx is not None and track_idx < len(parts):
+                    t = parts[track_idx]
+                    a = parts[artist_idx] if artist_idx is not None and artist_idx < len(parts) else ""
+                    name = f"{a} - {t}".strip(" -")
+                    name = self._clean_track_text(name)
+                    if name:
+                        lines.append(name)
+                else:
+                    rr = self._clean_track_text(row)
+                    if rr:
+                        lines.append(rr)
+
+                if len(lines) >= MAX_IMPORT_LINES:
+                    break
+
+            return lines[:MAX_IMPORT_LINES]
+        except Exception as e:
+            print(f"❌ _read_attachment_to_lines error: {e}")
+            return []
+
+    async def interactive_import_fallback(self, ctx, reason_text: str = "") -> list[str]:
+        prompt = (
+            f"{reason_text}\n"
+            f"📥 **Modo Import (automático)**\n"
+            f"➡️ Pega la lista (1 canción por línea) **O** adjunta un **.txt/.csv**.\n"
+            f"⏱️ Tienes **{IMPORT_WAIT_SECONDS}s**. Escribe `cancel` para cancelar."
+        ).strip()
+
+        await ctx.send(prompt)
+
+        def check(m: discord.Message):
+            if m.author != ctx.author:
+                return False
+            if m.channel != ctx.channel:
+                return False
+            return bool((m.content and m.content.strip()) or m.attachments)
+
+        try:
+            m = await self.bot.wait_for("message", timeout=IMPORT_WAIT_SECONDS, check=check)
+        except asyncio.TimeoutError:
+            await ctx.send("⏱️ Tiempo agotado. Intenta de nuevo con `.p <link>` o pega la lista.")
+            return []
+
+        if (m.content or "").strip().lower() == "cancel":
+            await ctx.send("✅ Import cancelado.")
+            return []
+
+        if m.attachments:
+            lines = await self._read_attachment_to_lines(m.attachments[0])
+            if lines:
+                return [f"ytsearch1:{ln} audio" for ln in lines if ln][:MAX_IMPORT_LINES]
+
+        text = (m.content or "").strip()
+        lines = [self._clean_track_text(x) for x in text.splitlines()]
+        lines = [x for x in lines if x]
+        if not lines:
+            await ctx.send("⚠️ No detecté canciones válidas. Intenta de nuevo.")
+            return []
+
+        lines = lines[:MAX_IMPORT_LINES]
+        return [f"ytsearch1:{ln} audio" for ln in lines if ln]
+
+    # -------------------------
     # AUTOPLAY helpers (anti repetidos + estricto)
     # -------------------------
     def _history_has(self, key: str) -> bool:
@@ -273,34 +421,25 @@ class Musica(commands.Cog):
             self.autoplay_history = self.autoplay_history[-cap:]
 
     def _duration_ok(self, entry: dict) -> bool:
-        """Filtra contenido largo / live / duración desconocida."""
         if not entry:
             return False
-
         if entry.get("is_live") or entry.get("live_status") in ("is_live", "live"):
             return False
-
         dur = entry.get("duration", None)
         if dur is None:
-            # evitar mixes/streams sin duración
             return False
-
         try:
             dur = int(dur)
         except Exception:
             return False
-
         if dur < AUTOPLAY_MIN_DURATION:
             return False
         if dur > AUTOPLAY_MAX_DURATION:
             return False
         return True
 
-    # ---------- Normalización fuerte ----------
     def _normalize_text(self, s: str) -> str:
         s = (s or "").lower()
-
-        # limpiar basura típica de YouTube
         trash = [
             "official video", "official music video", "official audio", "audio",
             "lyrics", "lyric video", "video oficial", "videoclip", "visualizer",
@@ -309,31 +448,18 @@ class Musica(commands.Cog):
         for t in trash:
             s = s.replace(t, "")
 
-        # normalizar feat/ft (para no crear variantes)
         s = s.replace("feat.", "feat").replace("ft.", "ft").replace("featuring", "feat")
-
-        # quita contenido entre paréntesis/corchetes (suele ser ruido)
         s = re.sub(r"\([^)]*\)", " ", s)
         s = re.sub(r"\[[^\]]*\]", " ", s)
 
-        # symbols -> espacios
         for ch in "{}|.,!?:;\"'`~@#$%^&*_+=<>/\\-":
             s = s.replace(ch, " ")
 
-        # colapsar espacios
         s = " ".join(s.split())
         return s
 
     def _core_title(self, title: str) -> str:
-        """
-        Núcleo del título para detectar misma canción aunque cambie canal/ID:
-        - normaliza texto
-        - quita palabras comunes que no cambian la canción
-        - quita 'remix', 'edit', 'sped up', 'slowed', etc. (config paranoica)
-        """
         t = self._normalize_text(title)
-
-        # Stopwords y términos que suelen crear duplicados
         drop = {
             "official", "video", "music", "audio", "lyrics", "lyric", "visualizer",
             "remix", "edit", "version", "ver", "mix", "extended", "radio", "live",
@@ -341,21 +467,16 @@ class Musica(commands.Cog):
             "instrumental", "karaoke", "clean", "explicit", "tiktok",
             "prod", "producer", "produced",
         }
-
         tokens = [w for w in t.split() if w not in drop and len(w) > 1]
         core = " ".join(tokens)
-
-        # recorte defensivo
         return core.strip()[:120]
 
     def _fingerprint(self, title: str, uploader: str) -> str:
-        """Huella para detectar misma canción aunque cambie (Audio/Video/Lyrics)."""
         t = self._normalize_text(title)[:90]
         u = self._normalize_text(uploader)[:50]
         return f"{t}::{u}"
 
     def _core_fingerprint(self, title: str) -> str:
-        """Huella SOLO del core title (independiente del uploader/canal)."""
         return self._core_title(title)
 
     def _seed_tokens(self, title: str, uploader: str) -> set:
@@ -367,42 +488,23 @@ class Musica(commands.Cog):
         return len(seed_tokens & cand_tokens)
 
     def _passes_strictness(self, overlap: int, seed_uploader: str, cand_title: str, cand_uploader: str) -> bool:
-        """
-        Estricto:
-        - mínimo 3 palabras en común
-        OR
-        - el uploader del seed aparece en el uploader/título candidato (radio artista)
-        """
         if overlap >= AUTOPLAY_MIN_OVERLAP:
             return True
-
         su = self._normalize_text(seed_uploader)
         if not su:
             return False
-
         ct = self._normalize_text(cand_title)
         cu = self._normalize_text(cand_uploader)
-
-        # si el artista/uploader es claramente el mismo
         if su and (su in cu or su in ct):
             return True
-
         return False
 
     def _near_duplicate_by_core(self, cand_title: str) -> bool:
-        """
-        Detecta duplicados por núcleo del título:
-        - si core exacto ya existe => duplicado
-        - si similitud SequenceMatcher alta con títulos recientes => duplicado
-        - si overlap de tokens del core muy alto => duplicado
-        """
         if not AUTOPLAY_PARANOID:
             return False
-
         core = self._core_title(cand_title)
         if not core or len(core) < 4:
             return False
-
         if core in self.autoplay_core_fingerprints:
             return True
 
@@ -410,17 +512,12 @@ class Musica(commands.Cog):
         if not cand_tokens:
             return False
 
-        # comparar con recientes
         for prev in self.autoplay_recent_core_titles:
             if not prev:
                 continue
-
-            # similitud de string (tolerante a cambios leves)
             ratio = difflib.SequenceMatcher(None, core, prev).ratio()
             if ratio >= AUTOPLAY_DUP_SIM_THRESHOLD:
                 return True
-
-            # overlap por tokens
             prev_tokens = set(prev.split())
             if not prev_tokens:
                 continue
@@ -430,35 +527,22 @@ class Musica(commands.Cog):
                 j = inter / union
                 if j >= AUTOPLAY_DUP_TOKEN_OVERLAP:
                     return True
-
         return False
 
     def _already_used(self, url: str, fp: str, cand_title: str = "") -> bool:
         if not url:
             return True
-
-        # si coincide con el track actual (si current_track es URL real)
         if self.current_track and url == self.current_track:
             return True
-
         if url in self.song_queue:
             return True
-
-        # fingerprints "clásicos"
         if fp in self.autoplay_fingerprints:
             return True
-
-        # paranoia: bloquear por core-title aunque sea otro canal/ID
         if cand_title and self._near_duplicate_by_core(cand_title):
             return True
-
         return False
 
     def _register_now_playing_for_autoplay(self, data: dict):
-        """
-        Registra SIEMPRE la canción actual como "usada"
-        para que autoplay no la recomiende en otra subida/canal.
-        """
         try:
             if not data:
                 return
@@ -469,17 +553,14 @@ class Musica(commands.Cog):
             title_now = data.get("title") or ""
             upl_now = data.get("uploader") or data.get("channel") or ""
 
-            # key robusto: ID primero, luego URL
             key_now = str(vid_now or url_now).strip()
             if key_now:
                 self._history_add(key_now)
 
-            # fingerprint tradicional
             fp_now = self._fingerprint(title_now, upl_now)
             if fp_now:
                 self.autoplay_fingerprints.add(fp_now)
 
-            # fingerprint paranoico (solo core title)
             core_fp = self._core_fingerprint(title_now)
             if core_fp:
                 self.autoplay_core_fingerprints.add(core_fp)
@@ -491,19 +572,15 @@ class Musica(commands.Cog):
     async def _search_youtube(self, query: str):
         loop = self.bot.loop
         try:
-            info = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+            # usamos el ytdl global de yt_dlp (config ya cargada)
+            ytdl_local = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+            info = await loop.run_in_executor(None, lambda: ytdl_local.extract_info(query, download=False))
             return (info or {}).get("entries") or []
         except Exception as e:
             print(f"❌ Autoplay search error: {e}")
             return []
 
     async def get_autoplay_candidate(self, seed_data: dict):
-        """
-        Autoplay Mix C, pero estricto:
-        1) related_videos del video actual (mejor género/vibe)
-        2) fallback a ytsearch alternando related/artist
-        Selecciona mejor candidato por overlap y filtros.
-        """
         if not seed_data:
             return None
 
@@ -517,12 +594,11 @@ class Musica(commands.Cog):
 
         seed_tokens = self._seed_tokens(seed_title, seed_uploader)
 
-        # --------------------------
-        # 1) related_videos (mejor)
-        # --------------------------
+        # 1) related_videos
         if seed_url:
             try:
-                info = await self.bot.loop.run_in_executor(None, lambda: ytdl.extract_info(seed_url, download=False))
+                ytdl_local = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+                info = await self.bot.loop.run_in_executor(None, lambda: ytdl_local.extract_info(seed_url, download=False))
                 related = (info or {}).get("related_videos") or []
 
                 best = None
@@ -542,11 +618,9 @@ class Musica(commands.Cog):
                     cand_title = e.get("title") or ""
                     cand_uploader = e.get("uploader") or e.get("channel") or ""
 
-                    # 🧨 paranoia: si el core title es casi igual al seed, descarta
                     if AUTOPLAY_PARANOID:
                         if self._near_duplicate_by_core(cand_title):
                             continue
-                        # también evita que el seed vuelva como "otro upload"
                         if self._core_title(cand_title) and self._core_title(seed_title):
                             r = difflib.SequenceMatcher(None, self._core_title(cand_title), self._core_title(seed_title)).ratio()
                             if r >= AUTOPLAY_DUP_SIM_THRESHOLD:
@@ -573,7 +647,6 @@ class Musica(commands.Cog):
                     self._history_add(key)
                     self.autoplay_fingerprints.add(fp)
 
-                    # paranoia: registra core title del candidato para bloquear clones futuros
                     if AUTOPLAY_PARANOID:
                         core_fp = self._core_fingerprint(cand_title)
                         if core_fp:
@@ -585,9 +658,7 @@ class Musica(commands.Cog):
             except Exception as e:
                 print(f"❌ related_videos error: {e}")
 
-        # --------------------------
-        # 2) fallback: búsqueda Mix C
-        # --------------------------
+        # 2) fallback
         self._autoplay_flip = not self._autoplay_flip
 
         if self._autoplay_flip:
@@ -624,7 +695,6 @@ class Musica(commands.Cog):
                 cand_title = e.get("title") or ""
                 cand_uploader = e.get("uploader") or e.get("channel") or ""
 
-                # 🧨 paranoia: filtra duplicados por core title
                 if AUTOPLAY_PARANOID:
                     if self._near_duplicate_by_core(cand_title):
                         continue
@@ -665,7 +735,6 @@ class Musica(commands.Cog):
         return None
 
     async def ensure_autoplay(self, ctx, seed_data: dict):
-        """Autoplay estricto: solo si hay gente, con cooldown y sin repetir."""
         if not self.autoplay_enabled:
             return
         if self.song_queue:
@@ -690,14 +759,13 @@ class Musica(commands.Cog):
             if not candidate:
                 return
 
-            # si todavía hay algo sonando, no forzar autoplay
             if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
                 return
 
             await self.play_music(ctx, candidate)
 
     # -------------------------
-    # Panel minimalista A1 (SIN barra de progreso)
+    # Panel minimalista (SIN barra)
     # -------------------------
     def build_now_playing_embed(self, ctx, paused=False):
         data = self.panel_data or {}
@@ -731,11 +799,9 @@ class Musica(commands.Cog):
             color=color
         )
 
-        # ✅ Mini portada (thumbnail)
         if thumbnail:
             embed.set_thumbnail(url=thumbnail)
 
-        # ✅ Sin barra: solo tiempos (más limpio)
         embed.add_field(
             name="⏱️ Tiempo",
             value=(
@@ -806,7 +872,6 @@ class Musica(commands.Cog):
         if len(self.song_queue) > 0:
             await self.play_music(ctx, self.song_queue.pop(0))
         else:
-            # ✅ Autoplay también aplica al skip si se queda sin cola
             if seed_data and self.autoplay_enabled and not self.loop_enabled:
                 await self.ensure_autoplay(ctx, seed_data)
 
@@ -824,15 +889,11 @@ class Musica(commands.Cog):
                 return await msg.edit(content="❌ Error de descarga.")
             await msg.delete()
 
-        # ✅ IMPORTANTÍSIMO: current_track debe ser URL real si existe (para compares)
         try:
             data = player.data or {}
             url_now = (data.get("webpage_url") or data.get("url") or "").strip()
             self.current_track = url_now or query
-
-            # 🧨 paranoia: registra el tema actual para que autoplay NO lo repita en otra subida
             self._register_now_playing_for_autoplay(data)
-
         except Exception as e:
             print(f"⚠️ Error set current_track/register: {e}")
             self.current_track = query
@@ -889,7 +950,6 @@ class Musica(commands.Cog):
 
         self.purge_old_cache(max_age_minutes=10)
 
-        # Panel "detenido" (opcional)
         if leave_panel and self.panel_msg and self.panel_ctx:
             try:
                 embed = self.build_now_playing_embed(self.panel_ctx, paused=False)
@@ -926,8 +986,12 @@ class Musica(commands.Cog):
 
     @commands.command(name="p")
     async def play(self, ctx, *, query: str):
-        """Reproduce música."""
-        # handshake para evitar “acelerado” al entrar (LXC)
+        """
+        ✅ TODO EN UNO:
+        - YouTube playlist => expande y encola
+        - Spotify/Apple => intenta scraping; si falla => modo import automático (pegar lista o adjuntar txt/csv)
+        - texto normal => reproduce o encola
+        """
         just_joined = False
         if not ctx.voice_client:
             await ctx.invoke(self.join)
@@ -937,37 +1001,39 @@ class Musica(commands.Cog):
         if just_joined:
             await asyncio.sleep(0.8)
 
-        # Spotify/Apple scraping (simple)
+        # 1) YouTube playlist
+        if self._is_youtube_playlist(query):
+            msg = await ctx.send("📜 Leyendo playlist de YouTube...")
+            urls = await self.expand_youtube_playlist(query)
+            if not urls:
+                return await msg.edit(content="❌ No pude leer esa playlist de YouTube.")
+            await msg.edit(content=f"✅ Playlist YouTube: **{len(urls)}** items añadidos a cola.")
+            await self.enqueue_many(ctx, urls)
+            return
+
+        # 2) Spotify/Apple: scraping => si falla => import automático
         is_preloaded = (self.preloaded_query == query and self.preloaded_player is not None)
+        if (not is_preloaded) and (self._is_spotify(query) or self._is_applemusic(query)):
+            msg = await ctx.send("🕵️ Intentando extraer playlist (scraping) y buscar en YouTube...")
+            yt_queries = await self.scrape_playlist_to_yt_queries(query)
 
-        if (not is_preloaded) and ("spotify.com" in query or "apple.com" in query):
-            msg_espera = await ctx.send("🕵️ Extrayendo nombres de la playlist...")
-            try:
-                headers = {"User-Agent": "Mozilla/5.0"}
-                res = requests.get(query, headers=headers, timeout=10)
-                soup = BeautifulSoup(res.text, "html.parser")
+            if yt_queries:
+                await msg.edit(content=f"✅ Listo: **{len(yt_queries)}** canciones añadidas (YouTube search).")
+                await self.enqueue_many(ctx, yt_queries)
+                return
 
-                song_names = [
-                    s.get("content")
-                    for s in soup.find_all("meta", property="music:song")
-                    if s.get("content")
-                ]
+            # fallback 100% confiable: import interactivo
+            await msg.edit(content="⚠️ No pude extraer por scraping. Activando modo Import automático…")
+            fallback_queries = await self.interactive_import_fallback(
+                ctx,
+                reason_text="🔁 **Scraping falló** (Spotify/Apple suele usar JS / bloquear)."
+            )
+            if fallback_queries:
+                await ctx.send(f"✅ Import: **{len(fallback_queries)}** canciones a la cola.")
+                await self.enqueue_many(ctx, fallback_queries)
+            return
 
-                if not song_names:
-                    await msg_espera.edit(content="⚠️ No pude leer la lista. Reproduciendo el link...")
-                else:
-                    song_names = list(dict.fromkeys([s for s in song_names if s]))
-                    for song in song_names:
-                        self.song_queue.append(song)
-
-                    await msg_espera.edit(content=f"✅ Añadidas **{len(song_names)}** canciones a la cola.")
-                    if not ctx.voice_client.is_playing():
-                        await self.play_music(ctx, self.song_queue.pop(0))
-                    return
-            except Exception as e:
-                print(f"Error scraping: {e}")
-
-        # Normal queue
+        # 3) Normal
         if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
             self.song_queue.append(query)
             await ctx.send(f"✅ En cola: `{clean_query(query)}`")
@@ -977,9 +1043,39 @@ class Musica(commands.Cog):
         else:
             await self.play_music(ctx, query)
 
+    @commands.command(name="import", aliases=["imp"])
+    async def import_cmd(self, ctx, *, text: str = None):
+        """
+        Import manual opcional (sigue existiendo).
+        Si no mandas texto, entra al modo interactivo (pegar o adjuntar).
+        """
+        just_joined = False
+        if not ctx.voice_client:
+            await ctx.invoke(self.join)
+            just_joined = True
+        if not ctx.voice_client:
+            return
+        if just_joined:
+            await asyncio.sleep(0.8)
+
+        if text and text.strip():
+            lines = [self._clean_track_text(x) for x in text.splitlines()]
+            lines = [x for x in lines if x][:MAX_IMPORT_LINES]
+            if not lines:
+                return await ctx.send("⚠️ No detecté canciones válidas.")
+            queries = [f"ytsearch1:{ln} audio" for ln in lines]
+            await ctx.send(f"📥 Import: **{len(queries)}** canciones a la cola.")
+            await self.enqueue_many(ctx, queries)
+            return
+
+        # interactivo
+        queries = await self.interactive_import_fallback(ctx, reason_text="📥 Import manual (sin link).")
+        if queries:
+            await ctx.send(f"✅ Import: **{len(queries)}** canciones a la cola.")
+            await self.enqueue_many(ctx, queries)
+
     @commands.command(name="autoplay", aliases=["radio"])
     async def autoplay_cmd(self, ctx):
-        """Activa o desactiva Autoplay."""
         self.autoplay_enabled = not self.autoplay_enabled
         estado = "✅ ON" if self.autoplay_enabled else "❌ OFF"
         await ctx.send(f"📻 Autoplay: **{estado}**")
@@ -990,16 +1086,13 @@ class Musica(commands.Cog):
 
     @commands.command(name="skip")
     async def skip_cmd(self, ctx):
-        """Salta la canción actual."""
         if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             ctx.voice_client.stop()
         else:
-            # si lo quieres silencioso, cambia esto por "return"
             await ctx.send("🚫 No hay ninguna canción reproduciéndose.")
 
     @commands.command(name="shuffle", aliases=["mix", "random"])
     async def shuffle_cmd(self, ctx):
-        """Mezcla la cola."""
         if len(self.song_queue) < 2:
             return await ctx.send("📉 Necesito al menos 2 canciones en la cola para mezclar.")
         random.shuffle(self.song_queue)

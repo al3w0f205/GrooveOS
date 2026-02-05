@@ -2,24 +2,22 @@
 from __future__ import annotations
 
 import discord
-from typing import Optional
 
 from cogs.utilidad import THEME, build_embed, clean_query, fmt_time, short_queue_preview
 
 
 def build_player_embed(guild: discord.Guild, player) -> discord.Embed:
-    connected = player.is_connected()
-    playing = player.is_playing()
-    paused = player.is_paused()
-    channel = player.voice.channel.name if player.voice else "—"
-
+    # Embed limpio (sin debug)
     embed = build_embed(
-    "🎶 GrooveOS Player",
-    "",
-    color=THEME["primary"]
-)
+        "🎶 GrooveOS Player",
+        "",  # <- sin connected=True...
+        color=THEME["primary"]
+    )
 
     cur = player.current
+    playing = player.is_playing()
+    paused = player.is_paused()
+
     if cur:
         status = "▶️ Reproduciendo" if playing else ("⏸️ Pausado" if paused else "⏹️ Detenido")
         embed.add_field(
@@ -39,19 +37,14 @@ def build_player_embed(guild: discord.Guild, player) -> discord.Embed:
     embed.add_field(name="📜 Próximas", value=short_queue_preview(upcoming, limit=3), inline=False)
 
     loop_state = "🎵" if player.loop_track else ("📜" if player.loop_queue else "OFF")
-    embed.set_footer(text=f"Loop: {loop_state}")
+    embed.set_footer(text=f"Loop: {loop_state}")  # <- sin Prefetch: ON
     return embed
 
 
 class MusicControls(discord.ui.View):
-    """
-    View persistente (timeout=None).
-    Usa custom_id fijos para que Discord reconozca los botones.
-    """
-
     def __init__(self, cog):
         super().__init__(timeout=None)
-        self.cog = cog  # cogs.musica.Musica
+        self.cog = cog
 
     async def _player(self, interaction: discord.Interaction):
         if not interaction.guild:
@@ -59,7 +52,7 @@ class MusicControls(discord.ui.View):
             return None
         return self.cog.service.get_player(interaction.guild.id)
 
-    @discord.ui.button(label="Pausa/Resume", style=discord.ButtonStyle.secondary, emoji="⏯️", custom_id="music:pause_resume")
+    @discord.ui.button(label="Pausa/Resume", style=discord.ButtonStyle.primary, emoji="⏯️", custom_id="music:pause_resume")
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
         player = await self._player(interaction)
         if not player:
@@ -86,7 +79,7 @@ class MusicControls(discord.ui.View):
         await interaction.response.send_message("🔁 " + state, ephemeral=True)
         await self.cog.refresh_panel(interaction.guild)
 
-    @discord.ui.button(label="Stop", style=discord.ButtonStyle.secondary, emoji="⏹️", custom_id="music:stop")
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="⏹️", custom_id="music:stop")
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         player = await self._player(interaction)
         if not player:

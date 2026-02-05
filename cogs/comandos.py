@@ -6,9 +6,7 @@ class Comandos(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name='hola')
-    async def hola(self, ctx):
-        await ctx.send(f'👋 ¡Hola, {ctx.author.name}! ¿En qué puedo ayudarte hoy?')
+
 
     @commands.command(name='info')
     async def info(self, ctx):
@@ -25,6 +23,7 @@ class Comandos(commands.Cog):
 
     @commands.command(name='queue', aliases=['q', 'cola'])
     async def queue(self, ctx):
+        """Cola actual de canciones"""
         musica_cog = self.bot.get_cog('Musica')
         if not musica_cog:
             return await ctx.send("⚠️ No encontré el módulo de música cargado.")

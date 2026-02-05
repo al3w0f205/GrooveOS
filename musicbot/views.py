@@ -14,10 +14,10 @@ def build_player_embed(guild: discord.Guild, player) -> discord.Embed:
     channel = player.voice.channel.name if player.voice else "—"
 
     embed = build_embed(
-        "🎶 GrooveOS Player",
-        f"connected={connected} playing={playing} paused={paused} channel={channel}",
-        color=THEME["primary"]
-    )
+    "🎶 GrooveOS Player",
+    "",
+    color=THEME["primary"]
+)
 
     cur = player.current
     if cur:
@@ -39,7 +39,7 @@ def build_player_embed(guild: discord.Guild, player) -> discord.Embed:
     embed.add_field(name="📜 Próximas", value=short_queue_preview(upcoming, limit=3), inline=False)
 
     loop_state = "🎵" if player.loop_track else ("📜" if player.loop_queue else "OFF")
-    embed.set_footer(text=f"Loop: {loop_state} • Prefetch: ON")
+    embed.set_footer(text=f"Loop: {loop_state}")
     return embed
 
 
@@ -59,7 +59,7 @@ class MusicControls(discord.ui.View):
             return None
         return self.cog.service.get_player(interaction.guild.id)
 
-    @discord.ui.button(label="Pausa/Resume", style=discord.ButtonStyle.primary, emoji="⏯️", custom_id="music:pause_resume")
+    @discord.ui.button(label="Pausa/Resume", style=discord.ButtonStyle.secondary, emoji="⏯️", custom_id="music:pause_resume")
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
         player = await self._player(interaction)
         if not player:
@@ -86,7 +86,7 @@ class MusicControls(discord.ui.View):
         await interaction.response.send_message("🔁 " + state, ephemeral=True)
         await self.cog.refresh_panel(interaction.guild)
 
-    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="⏹️", custom_id="music:stop")
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.secondary, emoji="⏹️", custom_id="music:stop")
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         player = await self._player(interaction)
         if not player:

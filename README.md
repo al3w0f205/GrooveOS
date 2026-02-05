@@ -1,3 +1,11 @@
+# GrooveOS (Legacy)
+
+⚠️ Este repositorio contiene la primera versión funcional de GrooveOS.
+
+👉 El desarrollo actual continúa en:
+➡️ https://github.com/al3w0f205/GrooveOS-v2
+
+
 # GrooveOS - Discord Bot - Gestión Proxmox & Música
 
 GrooveOS es un bot de Discord desarrollado en Python con una arquitectura **modular (Cogs)**. Su función principal es permitir la gestión remota de servidores de Minecraft alojados en contenedores **LXC de Proxmox**, además de ofrecer un sistema completo de música.

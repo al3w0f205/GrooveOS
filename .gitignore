@@ -27,3 +27,4 @@ youtube-*
 .git-credentials
 __pycache__/
 .cache/
+.gitconfig

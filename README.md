@@ -1,34 +1,60 @@
-# GrooveOS (Legacy)
+# GrooveOS
 
-⚠️ Este repositorio contiene la primera versión funcional de GrooveOS.
+![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
+![C++ Standard](https://img.shields.io/badge/std-c%2B%2B17-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-active%20development-orange)
 
-👉 El desarrollo actual continúa en:
-➡️ https://github.com/al3w0f205/GrooveOS-v2
+GrooveOS es un ecosistema operativo de alto rendimiento para la gestión de comunidades en Discord. Su arquitectura híbrida combina la velocidad de **C++** en el kernel para el procesamiento de datos con la flexibilidad de **Python** para la lógica de negocio, ofreciendo una solución escalable superior a los bots convencionales.
 
+---
 
-# GrooveOS - Discord Bot - Gestión Proxmox & Música
+## Tabla de Contenidos
 
-GrooveOS es un bot de Discord desarrollado en Python con una arquitectura **modular (Cogs)**. Su función principal es permitir la gestión remota de servidores de Minecraft alojados en contenedores **LXC de Proxmox**, además de ofrecer un sistema completo de música.
+- [GrooveOS](#grooveos)
+  - [Tabla de Contenidos](#tabla-de-contenidos)
+  - [Características Principales](#características-principales)
+  - [Arquitectura Técnica](#arquitectura-técnica)
+  - [Estructura del Repositorio](#estructura-del-repositorio)
 
-## 🛠️ Tecnologías Utilizadas
-* **Lenguaje:** Python 3.10+
-* **Librería de Discord:** discord.py
-* **Infraestructura:** Proxmox VE (API)
-* **Gestión de Minecraft:** Crafty Controller API
-* **Audio:** yt-dlp & FFmpeg
+---
 
-## 🏗️ Arquitectura del Proyecto
-El bot utiliza un sistema de **Cogs** para separar las responsabilidades y facilitar el mantenimiento:
-* `main.py`: El punto de entrada que carga los módulos y gestiona la conexión segura mediante variables de entorno.
-* `cogs/minecraft.py`: Controla el encendido del contenedor LXC 101 en Proxmox y el arranque del servidor mediante la API de Crafty.
-* `cogs/musica.py`: Maneja la reproducción de audio, colas de reproducción y streaming desde diversas plataformas.
+## Características Principales
 
-## 🎮 Comandos Principales
-* `.minecraft` o `.mc`: Despliega un panel interactivo con botones para iniciar el servidor de supervivencia.
-* `.p [búsqueda/link]`: Busca y reproduce música en el canal de voz actual.
-* `.stop`: Detiene la música y limpia la cola de reproducción.
-* `.join`: Une al bot al canal de voz del usuario.
-* `.skip` - Salta a la siguiente canción.
+* **Procesamiento Asíncrono Híbrido:** Delegación de tareas pesadas al núcleo de C++ para evitar bloqueos en el bucle de eventos principal de Discord.
+* **Persistencia Atómica:** Sistema de base de datos SQLite con transacciones seguras (ACID) para proteger los datos de usuario ante fallos.
+* **Sistema de Audio de Baja Latencia:** Motor de streaming optimizado con gestión de colas dinámicas.
+* **Modularidad (Hot-Pluggable):** Capacidad de recargar módulos de Python (Cogs) sin detener el núcleo del sistema.
 
-## 🔒 Seguridad
-Este proyecto implementa buenas prácticas de seguridad mediante el uso de archivos `.env` para ocultar tokens de acceso y credenciales de servidor, los cuales están protegidos mediante el archivo `.gitignore`.
+---
+
+## Arquitectura Técnica
+
+El sistema opera bajo un modelo de capas estrictas:
+
+1.  **Kernel (C++ / `/Kernel`):**
+    * Gestión de memoria y recursos del sistema.
+    * Comunicación Inter-Procesos (IPC) para orquestar servicios.
+2.  **Capa de Servicios (Python / `Cogs`):**
+    * `musica.py`: Streaming, filtros de audio y control de voz.
+    * `perfiles.py`: Algoritmo de nivelación y almacenamiento de XP.
+    * `utilidad.py`: Herramientas administrativas y logs de auditoría.
+3.  **Capa de Datos:**
+    * SQLite3 integrado para almacenamiento local de alta velocidad.
+
+---
+
+## Estructura del Repositorio
+
+```text
+GrooveOS/
+├── Kernel/                 # Código fuente C++ (Core)
+│   ├── src/                # Implementación (.cpp)
+│   └── include/            # Cabeceras (.h)
+├── Cogs/                   # Módulos de Python (Lógica)
+├── Data/                   # Esquemas y DB
+├── Scripts/                # Automatización
+├── build-toolchain.sh      # Script de compilación
+├── groove.sh               # Lanzador del sistema
+└── requirements.txt        # Dependencias de Python

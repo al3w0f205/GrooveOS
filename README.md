@@ -62,6 +62,7 @@ GrooveOS/
 ├── groove.sh               # Lanzador del sistema
 └── requirements.txt        # Dependencias de Python
 
+---
 
 ## Instalación y Despliegue
 

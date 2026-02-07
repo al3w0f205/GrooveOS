@@ -16,10 +16,10 @@ GrooveOS es un ecosistema operativo de alto rendimiento para la gestión de comu
   - [Tabla de Contenidos](#tabla-de-contenidos)
   - [Características Principales](#características-principales)
   - [Arquitectura Técnica](#arquitectura-técnica)
-  - [Estructura del Repositorio](#estructura-del-repositorio)
   - [Instalación y Despliegue](#instalación-y-despliegue)
     - [Requisitos Previos](#requisitos-previos)
     - [Pasos de Configuración](#pasos-de-configuración)
+  - [Estructura del Repositorio](#estructura-del-repositorio)
 
 ---
 
@@ -48,21 +48,6 @@ El sistema opera bajo un modelo de capas estrictas:
 
 ---
 
-## Estructura del Repositorio
-
-```text
-GrooveOS/
-├── Kernel/                 # Código fuente C++ (Core)
-│   ├── src/                # Implementación (.cpp)
-│   └── include/            # Cabeceras (.h)
-├── Cogs/                   # Módulos de Python (Lógica)
-├── Data/                   # Esquemas y DB
-├── Scripts/                # Automatización
-├── build-toolchain.sh      # Script de compilación
-├── groove.sh               # Lanzador del sistema
-└── requirements.txt        # Dependencias de Python
-
----
 
 ## Instalación y Despliegue
 
@@ -108,3 +93,17 @@ Siga estos pasos para configurar el entorno de desarrollo o producción.
     ```bash
     ./groove.sh
     ```
+
+## Estructura del Repositorio
+
+```text
+GrooveOS/
+├── Kernel/                 # Código fuente C++ (Core)
+│   ├── src/                # Implementación (.cpp)
+│   └── include/            # Cabeceras (.h)
+├── Cogs/                   # Módulos de Python (Lógica)
+├── Data/                   # Esquemas y DB
+├── Scripts/                # Automatización
+├── build-toolchain.sh      # Script de compilación
+├── groove.sh               # Lanzador del sistema
+└── requirements.txt        # Dependencias de Python

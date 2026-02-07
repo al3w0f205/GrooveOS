@@ -17,6 +17,9 @@ GrooveOS es un ecosistema operativo de alto rendimiento para la gestión de comu
   - [Características Principales](#características-principales)
   - [Arquitectura Técnica](#arquitectura-técnica)
   - [Estructura del Repositorio](#estructura-del-repositorio)
+  - [Instalación y Despliegue](#instalación-y-despliegue)
+    - [Requisitos Previos](#requisitos-previos)
+    - [Pasos de Configuración](#pasos-de-configuración)
 
 ---
 
@@ -58,3 +61,49 @@ GrooveOS/
 ├── build-toolchain.sh      # Script de compilación
 ├── groove.sh               # Lanzador del sistema
 └── requirements.txt        # Dependencias de Python
+
+
+## Instalación y Despliegue
+
+Siga estos pasos para configurar el entorno de desarrollo o producción.
+
+### Requisitos Previos
+
+* **Sistema Operativo:** Linux (Ubuntu/Debian recomendado) o macOS.
+* **Lenguajes:** Python 3.10+ y C++17 (GCC/Clang).
+* **Librerías del Sistema:** `libsqlite3-dev`, `ffmpeg`.
+
+### Pasos de Configuración
+
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone [https://github.com/al3w0f205/GrooveOS.git](https://github.com/al3w0f205/GrooveOS.git)
+    cd GrooveOS
+    ```
+
+2.  **Compilar el Kernel:**
+    Es mandatorio compilar el núcleo C++ antes de iniciar los servicios.
+    ```bash
+    chmod +x build-toolchain.sh
+    ./build-toolchain.sh
+    ```
+
+3.  **Configurar Entorno Python:**
+    Se recomienda encarecidamente el uso de un entorno virtual (venv) para aislar las dependencias.
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
+
+4.  **Variables de Entorno:**
+    ```bash
+    cp .env.example .env
+    # Edite el archivo .env con su DISCORD_TOKEN y OWNER_ID
+    ```
+
+5.  **Ejecución del Sistema:**
+    Utilice el lanzador principal para iniciar tanto el Kernel como los servicios.
+    ```bash
+    ./groove.sh
+    ```

@@ -157,7 +157,7 @@ class Musica(commands.Cog):
 
         tracks: list[Track] = []
         if spotify_url:
-            await ctx.send("🟢 Spotify detectado. Resolviendo → YouTube…")
+            await ctx.send("🟢 Spotify detectado.")
             items = await self.spotify.resolve(spotify_url)
             if not items:
                 return await ctx.send("⚠️ No pude leer ese enlace de Spotify.")

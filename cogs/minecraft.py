@@ -51,7 +51,7 @@ class Minecraft(commands.Cog):
         self.PROX_USER = 'root@pam'
         self.PROX_TOKEN_ID = 'bot-discord'
         self.NODE_NAME = 'pve'
-        self.CRAFTY_LXC_ID = 101 
+        self.CRAFTY_LXC_ID = 104 
         self.CRAFTY_URL = "https://192.168.100.220:8443" 
         self.SERVER_UUID = "30e9e767-7e85-4a3d-a8f3-a8868c189f83"
 

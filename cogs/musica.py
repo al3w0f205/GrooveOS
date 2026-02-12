@@ -57,11 +57,11 @@ def build_player_embed(guild, player):
     loop_txt = ""
     if player.loop_track: loop_txt = "🔂 Loop Canción"
     elif player.loop_queue: loop_txt = "🔁 Loop Cola"
-    
+
     footer_text = f"En cola: {queue_len} canciones"
     if loop_txt:
         footer_text += f" • {loop_txt}"
-        
+
     embed.set_footer(text=footer_text)
     return embed
 
@@ -116,7 +116,7 @@ class Musica(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.downloader = YTDLDownloader()
-        
+
         # Inicialización de Spotify (con protección por si fallan las claves)
         try:
             self.spotify = SpotifyResolver()
@@ -185,15 +185,15 @@ class Musica(commands.Cog):
 
         guild = self.bot.get_guild(guild_id)
         if not guild: return
-        
+
         member = guild.get_member(track.requester_id) if track.requester_id else None
-        
+
         # Intentamos recuperar el canal original, si no, el del panel
         channel = guild.get_channel(track.text_channel_id) if track.text_channel_id else None
         if not channel:
             panel = self.panel_message.get(guild_id)
             channel = panel.channel if panel else None
-        
+
         if not member or not channel or played_seconds <= 0: return
 
         mini = _MiniCtx(author=member, channel=channel)
@@ -234,7 +234,7 @@ class Musica(commands.Cog):
             await ctx.send("🟢 Enlace de Spotify detectado...")
             items = await self.spotify.resolve(spotify_url)
             if not items: return await ctx.send("⚠️ No pude leer ese enlace de Spotify.")
-            
+
             for it in items:
                 tracks.append(Track(
                     query=it.query, source="spotify", title=it.title,

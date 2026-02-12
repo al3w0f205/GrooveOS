@@ -1,3 +1,4 @@
+import traceback
 import discord
 from discord.ext import commands
 import os
@@ -16,18 +17,19 @@ bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 
 # ✅ Archivos que NO son extensiones (helpers)
 SKIP_FILES = {'__init__.py', 'utilidad.py'}
-
 # 3. Función para cargar automáticamente los cogs en /cogs
 async def load_extensions():
     for filename in os.listdir('./cogs'):
         if not filename.endswith('.py') or filename in SKIP_FILES:
             continue
-
+        mod = f'cogs.{filename[:-3]}'
         try:
-            await bot.load_extension(f'cogs.{filename[:-3]}')
+            await bot.load_extension(mod)
             print(f"✅ Módulo cargado con éxito: {filename}")
-        except Exception as e:
-            print(f"❌ Error al cargar {filename}: {e}")
+        except Exception:
+            print(f"❌ Error al cargar {filename}:")
+            traceback.print_exc()   # ← esto imprime el error real
+
 
 @bot.event
 async def on_ready():

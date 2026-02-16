@@ -39,12 +39,13 @@ class Sistema(commands.Cog):
                 print(f"💤 Desconectado por inactividad de: {voice_client.channel.name}")
                 
                 # Intentamos avisar en un canal de texto si es posible
-                # (Esto es opcional, busca un canal llamado 'comandos' o 'general')
                 for guild in self.bot.guilds:
                     if guild.id == voice_client.guild.id:
                         channel = discord.utils.get(guild.text_channels, name="comandos")
                         if channel:
-                            await channel.send(f"💤 Me desconecté de **{voice_client.channel.name}** porque me dejaron solo. ¡Ahorrando RAM!")
+                            try:
+                                await channel.send(f"💤 Me desconecté de **{voice_client.channel.name}** porque me dejaron solo. ¡Ahorrando RAM!")
+                            except: pass
 
     @tasks.loop(hours=6)
     async def auto_cleaner(self):
@@ -76,10 +77,11 @@ class Sistema(commands.Cog):
     # 🖥️ COMANDOS DE DIAGNÓSTICO
     # ==========================================
 
-    @commands.command(name='ping')
+    @commands.hybrid_command(name='ping', description="Muestra la latencia técnica del bot")
     async def ping(self, ctx):
         """Muestra la latencia técnica de la conexión."""
         start = time.perf_counter()
+        # Usamos defer() implícito o un mensaje inicial
         msg = await ctx.send("🏓 Calculando latencia...")
         end = time.perf_counter()
         
@@ -92,7 +94,11 @@ class Sistema(commands.Cog):
         
         await msg.edit(content=None, embed=embed)
 
-    @commands.command(name='sys', aliases=['neofetch', 'host'])
+    @commands.hybrid_command(
+        name='sys', 
+        aliases=['neofetch', 'host'], 
+        description="Muestra el estado del servidor y recursos del sistema"
+    )
     async def system_status(self, ctx):
         """Dashboard de estado del servidor (Proxmox Container)."""
         
@@ -110,7 +116,7 @@ class Sistema(commands.Cog):
         gb_total = total / (1024**3)
         percent_used = (used / total) * 100
         
-        # 4. Carga del Procesador (Load Average - Solo funciona en Linux/Unix)
+        # 4. Carga del Procesador
         try:
             load1, load5, load15 = os.getloadavg()
             cpu_status = f"1m: {load1:.2f} | 5m: {load5:.2f}"
@@ -137,7 +143,10 @@ class Sistema(commands.Cog):
         
         await ctx.send(embed=embed)
 
-    @commands.command(name='limpiar')
+    @commands.hybrid_command(
+        name='limpiar', 
+        description="Fuerza la limpieza de archivos temporales de audio"
+    )
     @commands.has_permissions(administrator=True)
     async def force_clean(self, ctx):
         """Fuerza la limpieza de archivos temporales (Solo Admins)."""

@@ -19,13 +19,16 @@ class SimpleLauncher(discord.ui.View):
 
     @discord.ui.button(label="🚀 Iniciar Servidor Survival", style=discord.ButtonStyle.green, emoji="🌲")
     async def start_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Deshabilitamos botones para evitar spam
         for child in self.children: child.disabled = True
         await interaction.response.edit_message(view=self)
         
         # Llamamos a la lógica que está en el Cog
         await self.cog.start_logic_direct(interaction)
         
+        # Re-habilitamos botones al finalizar
         for child in self.children: child.disabled = False
+        await interaction.edit_original_response(view=self)
 
     @discord.ui.button(label="Estado Proxmox", style=discord.ButtonStyle.secondary, emoji="📊")
     async def status_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -46,7 +49,7 @@ class Minecraft(commands.Cog):
         self.PROX_SECRET = os.getenv('PROX_SECRET')
         self.CRAFTY_TOKEN = os.getenv('CRAFTY_TOKEN')
         
-        # Configuración fija (se queda aquí)
+        # Configuración fija
         self.PROX_HOST = '192.168.100.218'
         self.PROX_USER = 'root@pam'
         self.PROX_TOKEN_ID = 'bot-discord'
@@ -65,7 +68,7 @@ class Minecraft(commands.Cog):
         )
 
     async def wait_for_crafty(self, message_to_edit):
-        """Espera a que Crafty responda. Definida aquí para evitar errores de 'not defined'."""
+        """Espera a que Crafty responda."""
         headers = {"Authorization": f"Bearer {self.CRAFTY_TOKEN}"}
         for i in range(30): 
             try:
@@ -80,7 +83,8 @@ class Minecraft(commands.Cog):
         return False
 
     async def start_logic_direct(self, interaction):
-        """Secuencia de arranque directa."""
+        """Secuencia de arranque directa para interacciones de botones."""
+        # Al ser un botón, usamos followup porque ya editamos el mensaje original para deshabilitar botones
         msg = await interaction.followup.send("🚀 **Iniciando secuencia de arranque...**")
 
         try:
@@ -112,9 +116,13 @@ class Minecraft(commands.Cog):
         except Exception as e:
             await msg.edit(content=f"❌ Error final: {e}")
 
-    @commands.command(name="minecraft", aliases=['mc'])
+    @commands.hybrid_command(
+        name="minecraft", 
+        aliases=['mc'], 
+        description="Despliega el panel de control del servidor de Minecraft"
+    )
     async def panel_mc(self, ctx):
-        """Comando para desplegar el panel."""
+        """Comando para desplegar el panel de control de Minecraft."""
         embed = discord.Embed(
             title="🎮 Centro de Control Minecraft", 
             description="Presiona para encender el servidor Survival.", 

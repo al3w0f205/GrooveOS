@@ -127,8 +127,13 @@ class Perfiles(commands.Cog):
 
             await db.commit()
 
-    @commands.command(name='perfil', aliases=['p-stats', 'profile', 'pstats'])
+    @commands.hybrid_command(
+        name='perfil', 
+        aliases=['p-stats', 'profile', 'pstats'], 
+        description="Muestra tus estadísticas o las de otro miembro"
+    )
     async def perfil(self, ctx, member: discord.Member = None):
+        """Muestra el nivel, experiencia y tiempo de escucha."""
         member = member or ctx.author
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute('SELECT * FROM usuarios WHERE user_id = ?', (member.id,))
@@ -161,8 +166,12 @@ class Perfiles(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='top')
+    @commands.hybrid_command(
+        name='top', 
+        description="Muestra el ranking de los usuarios con más nivel"
+    )
     async def top(self, ctx):
+        """Muestra el Top 5 global de GrooveOS."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 'SELECT user_id, nivel, xp FROM usuarios ORDER BY nivel DESC, xp DESC LIMIT 5'
@@ -197,8 +206,12 @@ class Perfiles(commands.Cog):
         embed.description = "\n".join(desc_lines) if desc_lines else "Sin datos."
         await ctx.send(embed=embed)
 
-    @commands.command(name='stats')
+    @commands.hybrid_command(
+        name='stats', 
+        description="Muestra las estadísticas globales del bot en este servidor"
+    )
     async def stats(self, ctx):
+        """Resumen total de canciones, tiempo y usuarios."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 'SELECT SUM(canciones_pedidas), SUM(segundos_escuchados), COUNT(*) FROM usuarios'

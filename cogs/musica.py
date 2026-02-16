@@ -203,14 +203,14 @@ class Musica(commands.Cog):
             )
         except Exception: pass
 
-    # ---------------- Comandos ----------------
-    @commands.command(name="panel")
+    # ---------------- Comandos Híbridos ----------------
+    @commands.hybrid_command(name="panel", description="Muestra el panel de control musical en el canal actual")
     async def panel(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         msg = await ctx.send(embed=build_player_embed(ctx.guild, player), view=self.controls)
         self.panel_message[ctx.guild.id] = msg
 
-    @commands.command(name="join", aliases=["j"])
+    @commands.hybrid_command(name="join", aliases=["j"], description="Conecta el bot a tu canal de voz")
     async def join(self, ctx: commands.Context):
         if not ctx.author.voice: return await ctx.send("🎧 Entra a un canal de voz primero.")
         player = self.service.get_player(ctx.guild.id)
@@ -219,7 +219,7 @@ class Musica(commands.Cog):
         await ctx.send("✅ Conectado.")
         await self.refresh_panel(ctx.guild)
 
-    @commands.command(name="play", aliases=["p"])
+    @commands.hybrid_command(name="play", aliases=["p"], description="Reproduce música desde YouTube o Spotify")
     async def play(self, ctx: commands.Context, *, query: str):
         if not ctx.author.voice: return await ctx.send("🎧 Entra a un canal de voz primero.")
         player = self.service.get_player(ctx.guild.id)
@@ -260,33 +260,33 @@ class Musica(commands.Cog):
         await player.enqueue(tracks)
         await self.refresh_panel(ctx.guild)
 
-    @commands.command(name="skip", aliases=["s"])
+    @commands.hybrid_command(name="skip", aliases=["s"], description="Salta a la siguiente canción")
     async def skip(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         ok, msg = await player.skip()
         await ctx.send(("✅ " if ok else "ℹ️ ") + msg)
 
-    @commands.command(name="stop")
+    @commands.hybrid_command(name="stop", description="Detiene la música y limpia la cola")
     async def stop(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         ok, msg = await player.stop()
         await ctx.send(("✅ " if ok else "ℹ️ ") + msg)
 
-    @commands.command(name="loop")
+    @commands.hybrid_command(name="loop", description="Alterna entre los modos de repetición")
     async def loop(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         state = player.toggle_loop_mode()
         await ctx.send("🔁 " + state)
         await self.refresh_panel(ctx.guild)
 
-    @commands.command(name="pause")
+    @commands.hybrid_command(name="pause", description="Pausa la reproducción actual")
     async def pause(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         ok, msg = await player.toggle_pause()
         await ctx.send(("✅ " if ok else "ℹ️ ") + msg)
         await self.refresh_panel(ctx.guild)
 
-    @commands.command(name="resume")
+    @commands.hybrid_command(name="resume", description="Reanuda la música pausada")
     async def resume(self, ctx: commands.Context):
         player = self.service.get_player(ctx.guild.id)
         ok, msg = await player.toggle_pause()

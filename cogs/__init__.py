@@ -1,3 +1,10 @@
+import asyncio
+import ctypes
+import os
+
+import discord
+
+
 def __init__(self, bot):
     self.bot = bot
 

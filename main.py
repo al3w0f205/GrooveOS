@@ -106,67 +106,7 @@ async def sync(ctx: commands.Context):
     except Exception as e:
         await msg.edit(content=f"❌ **Error durante la sincronización:**\n`{e}`")
 
-# =========================
-#  Help híbrido (.help / /help)
-# =========================
-@bot.hybrid_command(
-    name="help",
-    description="Muestra la lista de comandos disponibles de GrooveOS 2.0"
-)
-async def custom_help(ctx: commands.Context):
-    """Guía interactiva de comandos organizada por categorías."""
-    prefix = ctx.prefix if ctx.prefix else "/"
 
-    embed = discord.Embed(
-        title="📚 Centro de Ayuda - GrooveOS",
-        description=(
-            f"¡Hola! Puedes usar mis comandos con `{prefix}` o con `/`.\n"
-            "Aquí tienes mi lista de funcionalidades disponibles:"
-        ),
-        color=discord.Color.blurple()
-    )
-
-    # Agrupamos comandos por Cog
-    categories = {}
-    for cmd in bot.commands:
-        # Mientras debug, puedes comentar este filtro:
-        # if cmd.hidden:
-        #     continue
-        cog_name = cmd.cog_name if cmd.cog_name else "General"
-        categories.setdefault(cog_name, []).append(cmd)
-
-    # Construimos los campos del embed por categoría
-    for cog, cmds in sorted(categories.items()):
-        lines = []
-        for c in sorted(cmds, key=lambda x: x.name):
-            desc = (c.help or c.description or "Sin descripción").split("\n")[0]
-            # Formato: .comando <args> / /comando
-            usage = f"**`{prefix}{c.name}`** | **`/{c.name}`**"
-
-            # Marca si el usuario probablemente puede ejecutarlo
-            mark = "?"
-            try:
-                can_run = await c.can_run(ctx)
-                mark = "✅" if can_run else "⛔"
-            except Exception:
-                mark = "⛔"
-
-            lines.append(f"{usage} {mark}\n└ *{desc}*")
-
-        field_content = "\n".join(lines) or "_(sin comandos)_"
-        if len(field_content) > 1024:
-            field_content = field_content[:1020] + "..."
-        embed.add_field(name=f"📦 {cog}", value=field_content, inline=False)
-
-    embed.set_footer(
-        text=f"Solicitado por {ctx.author.display_name} • Proyecto de Ingeniería",
-        icon_url=ctx.author.display_avatar.url
-    )
-    await ctx.send(embed=embed)
-
-# =========================
-#  Debug opcional (útil ahora)
-# =========================
 @bot.command(name="debugcmds")
 @commands.is_owner()
 async def debugcmds(ctx: commands.Context):

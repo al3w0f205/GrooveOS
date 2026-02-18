@@ -1,73 +1,124 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
-from gtts import gTTS
+import edge_tts
 import os
 import asyncio
-import functools
 
 class TTS(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Usamos la carpeta que ya tienes en tu estructura
-        self.audio_path = "./tmp_audio/tts_temp.mp3"
-        self._check_folder()
-
-    def _check_folder(self):
-        """Asegura que la carpeta temporal exista."""
-        if not os.path.exists("./tmp_audio"):
-            os.makedirs("./tmp_audio")
-
-    def generar_audio(self, texto, idioma='es'):
-        """Función bloqueante que genera el archivo de audio."""
-        tts = gTTS(text=texto, lang=idioma)
-        tts.save(self.audio_path)
-
-    @commands.hybrid_command(name="tts", description="El bot entra al canal y lee tu mensaje.")
-    async def tts(self, ctx, *, texto: str):
-        """Convierte texto a voz y lo reproduce en el canal."""
         
-        # 1. Verificar si el usuario está en un canal de voz
+        # --- CONFIGURACIÓN ---
+        # Voces disponibles comunes:
+        # 'es-MX-JorgeNeural' (Hombre México)
+        # 'es-ES-AlvaroNeural' (Hombre España)
+        # 'es-MX-DaliaNeural' (Mujer México)
+        self.DEFAULT_VOICE = 'es-MX-JorgeNeural' 
+        
+        # Velocidad de lectura
+        self.DEFAULT_RATE = '-5%'
+        # ---------------------
+
+        # Rutas absolutas para compatibilidad con Linux/LXC
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.root_dir = os.path.dirname(self.base_dir)
+        self.audio_folder = os.path.join(self.root_dir, "tmp_audio")
+        self.audio_path = os.path.join(self.audio_folder, "tts_edge.mp3")
+        
+        # Crear carpeta si no existe
+        if not os.path.exists(self.audio_folder):
+            os.makedirs(self.audio_folder)
+
+    async def generar_audio_edge(self, texto, voz, velocidad):
+        """Genera el audio usando Microsoft Edge TTS."""
+        try:
+            communicate = edge_tts.Communicate(texto, voz, rate=velocidad)
+            await communicate.save(self.audio_path)
+            return True
+        except Exception as e:
+            print(f"[TTS] Error generando archivo: {e}")
+            return False
+
+    @commands.hybrid_command(name="tts", description="Habla en el chat de voz.")
+    async def tts(self, ctx, *, texto: str):
+        """Dice el texto en el canal de voz y borra el archivo al terminar."""
+        
+        # 1. Verificar si el usuario está en un canal
         if not ctx.author.voice:
-            return await ctx.send("❌ Debes estar en un canal de voz para usar este comando.", ephemeral=True)
+            return await ctx.send("❌ ¡Entra a un canal de voz primero!", ephemeral=True)
 
         canal_usuario = ctx.author.voice.channel
-        voice_client = ctx.voice_client
+        voice_client = ctx.guild.voice_client
 
-        # 2. Conexión o movimiento del bot
-        if voice_client is None:
-            voice_client = await canal_usuario.connect()
-        elif voice_client.channel != canal_usuario:
-            await voice_client.move_to(canal_usuario)
-
-        # 3. Informar al usuario
-        await ctx.send(f"🗣️ **Diciendo:** {texto}", ephemeral=True)
-
-        # 4. Generar el audio (en un hilo separado para no bloquear el bot)
-        # Esto es crucial para que el bot no se 'cuelgue' mientras Google procesa el audio
+        # 2. Conectar o mover al bot
         try:
-            func = functools.partial(self.generar_audio, texto, 'es')
-            await self.bot.loop.run_in_executor(None, func)
+            if voice_client is None:
+                voice_client = await canal_usuario.connect()
+            elif voice_client.channel != canal_usuario:
+                await voice_client.move_to(canal_usuario)
         except Exception as e:
-            return await ctx.send(f"⚠️ Error generando el audio: {e}")
+            return await ctx.send(f"❌ Error de conexión: {e}")
 
-        # 5. Reproducir el audio
+        # 3. Notificación visual
+        await ctx.send(f"🎙️ **Diciendo:** {texto}", ephemeral=True)
+
+        # 4. Si ya está hablando, lo callamos primero
         if voice_client.is_playing():
             voice_client.stop()
 
-        source = discord.FFmpegPCMAudio(self.audio_path)
-        
-        # Usamos 'after' para limpiar errores o logs si fuera necesario, 
-        # pero no borramos el archivo inmediatamente para evitar conflictos de bloqueo de archivos.
-        voice_client.play(source, after=lambda e: print(f"Error en TTS: {e}") if e else None)
+        # 5. Generar audio nuevo
+        exito = await self.generar_audio_edge(texto, self.DEFAULT_VOICE, self.DEFAULT_RATE)
 
-    @commands.hybrid_command(name="leave", description="Saca al bot del canal de voz.")
-    async def leave(self, ctx):
-        """Comando de utilidad para desconectar al bot."""
-        if ctx.voice_client:
-            await ctx.voice_client.disconnect()
-            await ctx.send("👋 Desconectado.")
+        if not exito:
+            return await ctx.send("❌ Error generando el audio.")
+
+        # 6. Reproducir y limpiar
+        if os.path.exists(self.audio_path):
+            source = discord.FFmpegPCMAudio(self.audio_path)
+            
+            # Función local para borrar el archivo al terminar
+            def limpiar_archivo(error):
+                if error:
+                    print(f"[TTS] Error en reproducción: {error}")
+                try:
+                    if os.path.exists(self.audio_path):
+                        os.remove(self.audio_path)
+                        # print("[TTS] Archivo temporal eliminado.")
+                except Exception as e:
+                    print(f"[TTS] No se pudo borrar el archivo temporal: {e}")
+
+            # 'after' ejecuta la limpieza cuando el audio termina o se detiene
+            voice_client.play(source, after=limpiar_archivo)
+
+    @commands.hybrid_command(name="stoptts", aliases=["shh", "callate"], description="Detiene el audio actual inmediatamente.")
+    async def stoptts(self, ctx):
+        """Detiene la reproducción de voz al instante."""
+        voice_client = ctx.guild.voice_client
+        
+        if voice_client and voice_client.is_playing():
+            voice_client.stop() # Esto disparará 'limpiar_archivo' automáticamente
+            await ctx.send("🤫 Silencio.", ephemeral=True)
         else:
-            await ctx.send("❌ No estoy conectado a ningún canal de voz.", ephemeral=True)
+            await ctx.send("❌ No estoy diciendo nada ahora.", ephemeral=True)
+
+    @commands.hybrid_command(name="cambiar_voz", description="Cambia la voz del bot.")
+    @app_commands.choices(voz=[
+        app_commands.Choice(name="🇲🇽 Jorge (Hombre)", value="es-MX-JorgeNeural"),
+        app_commands.Choice(name="🇪🇸 Alvaro (Hombre)", value="es-ES-AlvaroNeural"),
+        app_commands.Choice(name="🇲🇽 Dalia (Mujer)", value="es-MX-DaliaNeural"),
+        app_commands.Choice(name="🇪🇸 Elvira (Mujer)", value="es-ES-ElviraNeural")
+    ])
+    async def cambiar_voz(self, ctx, voz: app_commands.Choice[str]):
+        """Permite cambiar la voz sin reiniciar el bot."""
+        self.DEFAULT_VOICE = voz.value
+        await ctx.send(f"✅ Voz cambiada a: **{voz.name}**")
+
+    @commands.hybrid_command(name="leave_tts", description="Desconecta al bot.")
+    async def leave_tts(self, ctx):
+        if ctx.guild.voice_client:
+            await ctx.guild.voice_client.disconnect()
+            await ctx.send("👋")
 
 async def setup(bot):
     await bot.add_cog(TTS(bot))
